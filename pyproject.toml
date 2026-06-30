@@ -1,0 +1,42 @@
+[project]
+name = "anno-sdk"
+version = "0.2.0"
+description = "Python SDK for the Anno annotation platform inference API"
+readme = "README.md"
+authors = [
+    { name = "Cam", email = "yulinfeng000@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-httpx>=0.35",
+    "ruff>=0.14",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "C4"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-httpx>=0.36.2",
+    "ruff>=0.15.20",
+]
