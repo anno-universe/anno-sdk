@@ -16,7 +16,7 @@ from anno_sdk import (
     Client,
     Image,
     Keypoint2D,
-    Mask2D,
+    Polygon2D,
     PaginatedResponse,
     ProjectMeta,
     RotatedBox2D,
@@ -263,7 +263,7 @@ def test_upload_annotations(client: Client, httpx_mock: HTTPXMock) -> None:
     annotations = [
         Annotation.from_geometry(Box2D(0, 0, 10, 10), label=0, client_ref="r1"),
         Annotation.from_geometry(Box2D(10, 0, 20, 10), label=1, client_ref="r2"),
-        Annotation.from_geometry(Mask2D([[0, 0]]), label=None, client_ref="r3"),
+        Annotation.from_geometry(Polygon2D([[0, 0]]), label=None, client_ref="r3"),
     ]
     result = client.upload_annotations(image_id=1, annotations=annotations)
     assert result.created == 2
@@ -287,7 +287,7 @@ def test_upload_annotations_all_geometry_types(client: Client, httpx_mock: HTTPX
     annotations = [
         Annotation.from_geometry(Box2D(0, 0, 1, 1), label=0),
         Annotation.from_geometry(RotatedBox2D(0, 0, 1, 1, 30), label=1),
-        Annotation.from_geometry(Mask2D([[0, 0]]), label=2),
+        Annotation.from_geometry(Polygon2D([[0, 0]]), label=2),
         Annotation.from_geometry(Keypoint2D([[1, 1]]), label=3),
     ]
     result = client.upload_annotations(image_id=1, annotations=annotations)

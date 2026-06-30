@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime
 
+import pytest
+
 from anno_sdk.types import (
     Annotation,
     AnnotationBatchResult,
@@ -12,7 +14,7 @@ from anno_sdk.types import (
     Box2D,
     Image,
     Keypoint2D,
-    Mask2D,
+    Polygon2D,
     PaginatedResponse,
     ProjectMeta,
     RotatedBox2D,
@@ -53,13 +55,55 @@ class TestRotatedBox2D:
         assert RotatedBox2D(0, 0, 1, 1, 0).annotation_type == "box"
 
 
-class TestMask2D:
+class TestPolygon2D:
     def test_to_dict(self) -> None:
-        mask = Mask2D(points=[[0, 0], [10, 0], [10, 10], [0, 10]])
-        assert mask.to_dict() == {"points": [[0, 0], [10, 0], [10, 10], [0, 10]]}
+        poly = Polygon2D(points=[[0, 0], [10, 0], [10, 10], [0, 10]])
+        assert poly.to_dict() == {"points": [[0, 0], [10, 0], [10, 10], [0, 10]]}
 
     def test_annotation_type_is_polygon(self) -> None:
-        assert Mask2D([]).annotation_type == "polygon"
+        assert Polygon2D([]).annotation_type == "polygon"
+
+
+class TestPolygon2DFromBinaryMask:
+    """Tests for Polygon2D.from_binary_mask()."""
+
+    def test_simple_square(self) -> None:
+        import numpy as np
+
+        mask = np.zeros((10, 10), dtype=np.uint8)
+        mask[2:6, 3:7] = 1  # 4x4 square
+
+        poly = Polygon2D.from_binary_mask(mask)
+        assert len(poly.points) >= 4
+        # All points should be within the mask bounds
+        for x, y in poly.points:
+            assert 2 <= y < 6
+            assert 3 <= x < 7
+
+    def test_accepts_list_of_lists(self) -> None:
+        mask = [[0, 0, 0], [0, 1, 0], [0, 0, 0]]
+        poly = Polygon2D.from_binary_mask(mask)
+        assert len(poly.points) >= 3
+
+    def test_empty_mask_raises(self) -> None:
+        import numpy as np
+
+        with pytest.raises(ValueError, match="empty"):
+            Polygon2D.from_binary_mask(np.zeros((5, 5), dtype=np.uint8))
+
+    def test_wrong_ndim_raises(self) -> None:
+        import numpy as np
+
+        with pytest.raises(ValueError, match="2-D"):
+            Polygon2D.from_binary_mask(np.zeros((3, 3, 3), dtype=np.uint8))
+
+    def test_annotation_type(self) -> None:
+        import numpy as np
+
+        mask = np.zeros((5, 5), dtype=np.uint8)
+        mask[1, 1] = 1
+        poly = Polygon2D.from_binary_mask(mask)
+        assert poly.annotation_type == "polygon"
 
 
 class TestKeypoint2D:
@@ -93,8 +137,8 @@ class TestAnnotation:
             "box": {"x": 0, "y": 0, "width": 10, "height": 10, "rotation": 30.0},
         }
 
-    def test_to_dict_mask2d(self) -> None:
-        ann = Annotation(label=None, geometry=Mask2D([[0, 0], [1, 1]]))
+    def test_to_dict_polygon2d(self) -> None:
+        ann = Annotation(label=None, geometry=Polygon2D([[0, 0], [1, 1]]))
         assert ann.to_dict() == {
             "annotation_type": "polygon",
             "label": None,

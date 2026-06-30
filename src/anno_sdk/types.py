@@ -5,7 +5,7 @@ Geometry DOs
 Each geometry class knows its own ``annotation_type`` string and can
 serialize itself to the backend wire format via :meth:`to_dict`.
 
-* :class:`Mask2D` — polygon mask, backend type ``"polygon"``
+* :class:`Polygon2D` — polygon defined by ``[[x, y], ...]`` points, backend type ``"polygon"``
 * :class:`Box2D` — axis-aligned bounding box, backend type ``"box"``
 * :class:`RotatedBox2D` — rotated bounding box, backend type ``"box"``
 * :class:`Keypoint2D` — keypoint set, backend type ``"keypoint"``
@@ -89,8 +89,8 @@ class RotatedBox2D:
 
 
 @dataclass
-class Mask2D:
-    """Polygon mask defined by a closed list of ``[x, y]`` points."""
+class Polygon2D:
+    """Polygon defined by a closed list of ``[x, y]`` points."""
 
     points: list[list[float]]
 
@@ -100,6 +100,66 @@ class Mask2D:
 
     def to_dict(self) -> dict:
         return {"points": self.points}
+
+    @classmethod
+    def from_binary_mask(
+        cls,
+        mask,
+        *,
+        simplification_epsilon: float | None = None,
+    ) -> Polygon2D:
+        """Create a ``Polygon2D`` from a 2-D binary segmentation mask.
+
+        Extracts the largest external contour from the mask and returns it as
+        polygon points.  The mask is expected as a 2-D array where non-zero
+        values indicate the region of interest.
+
+        Parameters
+        ----------
+        mask:
+            A 2-D array-like (e.g. ``numpy.ndarray``, ``list[list[int]]``).
+        simplification_epsilon:
+            If provided, simplify the contour with the Douglas-Peucker
+            algorithm (requires ``opencv-python`` / ``cv2``).  Larger values
+            produce fewer vertices.
+
+        Returns
+        -------
+        Polygon2D
+            Polygon whose ``points`` are the contour vertices as
+            ``[[x, y], ...]`` in pixel coordinates.
+
+        Raises
+        ------
+        ImportError
+            If ``numpy`` is not installed.
+        ValueError
+            If the mask is empty (all zeros) or has no contour.
+        """
+        import numpy as np
+
+        mask_arr = np.asarray(mask, dtype=np.uint8)
+        if mask_arr.ndim != 2:
+            raise ValueError(
+                f"Expected a 2-D mask, got {mask_arr.ndim}-D array with shape {mask_arr.shape}"
+            )
+        if not mask_arr.any():
+            raise ValueError("Mask is empty (all zeros) — no contour to extract.")
+
+        contour = _extract_largest_contour(mask_arr)
+
+        if contour is None or len(contour) < 3:
+            raise ValueError("Failed to extract a valid contour from the mask.")
+
+        # contour shape is (N, 1, 2) from cv2 or (N, 2) from the pure-Python
+        # fallback — normalise to (N, 2).
+        contour = np.squeeze(contour, axis=1) if contour.ndim == 3 else contour
+
+        if simplification_epsilon is not None:
+            contour = _simplify_contour(contour, simplification_epsilon)
+
+        points: list[list[float]] = contour.astype(float).tolist()
+        return cls(points=points)
 
 
 @dataclass
@@ -120,7 +180,7 @@ class Keypoint2D:
 # Union type for annotation geometry
 # ---------------------------------------------------------------------------
 
-GeometryDO = Box2D | RotatedBox2D | Mask2D | Keypoint2D
+GeometryDO = Box2D | RotatedBox2D | Polygon2D | Keypoint2D
 
 # ---------------------------------------------------------------------------
 # Annotation payload
@@ -178,7 +238,7 @@ class Annotation:
 def _geometry_from_dict(annotation_type: str, data: dict) -> GeometryDO:
     """Build a geometry DO from a wire-format geometry payload."""
     if annotation_type == "polygon":
-        return Mask2D(points=data["points"])
+        return Polygon2D(points=data["points"])
     if annotation_type == "keypoint":
         return Keypoint2D(points=data["points"])
     if annotation_type == "box":
@@ -353,3 +413,106 @@ class AnnotationModifyResult:
 def _parse_datetime(value: str) -> datetime.datetime:
     """Parse an ISO-8601 datetime string, handling both ``Z`` and offset suffixes."""
     return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+# ---------------------------------------------------------------------------
+# Contour helpers (used by Polygon2D.from_binary_mask)
+# ---------------------------------------------------------------------------
+
+
+def _extract_largest_contour(mask: "numpy.ndarray") -> "numpy.ndarray | None":
+    """Return the largest external contour from a binary mask.
+
+    Tries ``cv2.findContours`` first; falls back to a pure-Python
+    border-following algorithm when ``cv2`` is not available.
+    """
+    try:
+        import cv2
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        return max(contours, key=cv2.contourArea)
+    except ImportError:
+        pass
+
+    # Pure-Python fallback — simple border following.
+    return _trace_border_python(mask)
+
+
+def _trace_border_python(mask: "numpy.ndarray") -> "numpy.ndarray | None":
+    """Trace the external border of the first non-zero region using Moore-Neighbor tracing."""
+    import numpy as np
+
+    rows, cols = mask.shape
+
+    # Find the first non-zero pixel (topmost, then leftmost).
+    nonzero = np.argwhere(mask)
+    if len(nonzero) == 0:
+        return None
+
+    start_r, start_c = nonzero[0]  # (row, col)
+
+    # Moore neighborhood: 8-connected, clockwise starting from "up".
+    # Directions:  0=up, 1=up-right, 2=right, 3=down-right,
+    #               4=down, 5=down-left, 6=left, 7=up-left
+    dr = [-1, -1, 0, 1, 1, 1, 0, -1]
+    dc = [0, 1, 1, 1, 0, -1, -1, -1]
+
+    boundary: list[tuple[int, int]] = [(start_c, start_r)]  # (x, y)
+
+    # Start searching from direction 0 (up); backtrack direction is opposite.
+    curr_r, curr_c = start_r, start_c
+    search_dir = 0  # begin searching clockwise from "up"
+
+    while True:
+        found = False
+        for i in range(8):
+            d = (search_dir + i) % 8
+            nr = curr_r + dr[d]
+            nc = curr_c + dc[d]
+            if 0 <= nr < rows and 0 <= nc < cols and mask[nr, nc]:
+                boundary.append((nc, nr))  # (x, y)
+                curr_r, curr_c = nr, nc
+                # Next search starts from the direction opposite to where we came from,
+                # rotated one step counter-clockwise.
+                search_dir = (d + 4 + 1) % 8  # opposite + one step
+                found = True
+                break
+
+        if not found:
+            # Isolated single-pixel blob — return the pixel's bounding box.
+            nc, nr = start_c, start_r
+            boundary = [
+                (nc, nr),
+                (nc + 1, nr),
+                (nc + 1, nr + 1),
+                (nc, nr + 1),
+            ]
+            break
+
+        if (curr_r, curr_c) == (start_r, start_c):
+            break
+
+        # Safety limit to avoid infinite loops on pathological input.
+        if len(boundary) > rows * cols:
+            break
+
+    # Return in cv2-compatible shape (N, 1, 2).
+    return np.array(boundary, dtype=np.int32).reshape(-1, 1, 2)
+
+
+def _simplify_contour(
+    contour: "numpy.ndarray", epsilon: float
+) -> "numpy.ndarray":
+    """Simplify a contour using Douglas-Peucker (requires ``cv2``)."""
+    try:
+        import cv2
+        import numpy as np
+
+        return cv2.approxPolyDP(contour.astype(np.float32), epsilon, closed=True)
+    except ImportError:
+        raise ImportError(
+            "simplification_epsilon requires opencv-python (cv2). "
+            "Install it with: pip install opencv-python"
+        ) from None

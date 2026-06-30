@@ -8,7 +8,7 @@ from anno_sdk import (
     InferenceRequestMeta,
     InferenceResponse,
     Keypoint2D,
-    Mask2D,
+    Polygon2D,
     Predictor,
     RotatedBox2D,
     serve_predict,
@@ -35,9 +35,9 @@ class TestAnnotationFromDict:
         assert restored.geometry.rotation == 30.0
 
     def test_polygon_roundtrip(self) -> None:
-        ann = Annotation(label=None, geometry=Mask2D([[0, 0], [1, 1], [2, 0]]))
+        ann = Annotation(label=None, geometry=Polygon2D([[0, 0], [1, 1], [2, 0]]))
         restored = Annotation.from_dict(ann.to_dict())
-        assert isinstance(restored.geometry, Mask2D)
+        assert isinstance(restored.geometry, Polygon2D)
         assert restored.geometry.points == [[0, 0], [1, 1], [2, 0]]
         assert restored.label is None
 
@@ -94,7 +94,7 @@ class TestInferenceResponse:
             annotations=[
                 Annotation(label=1, geometry=Box2D(0, 0, 10, 10)),
                 Annotation(label=2, geometry=RotatedBox2D(0, 0, 10, 10, rotation=45.0)),
-                Annotation(label=None, geometry=Mask2D([[0, 0], [1, 1]])),
+                Annotation(label=None, geometry=Polygon2D([[0, 0], [1, 1]])),
                 Annotation(label=3, geometry=Keypoint2D([[5, 5]])),
             ],
             model_version="v1.2",

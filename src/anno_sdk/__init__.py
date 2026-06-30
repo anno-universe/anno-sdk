@@ -2,7 +2,7 @@
 
 Usage::
 
-    from anno_sdk import Client, Annotation, Box2D, Mask2D
+    from anno_sdk import Client, Annotation, Box2D, Polygon2D
 
     client = Client(base_url="http://localhost:8000", api_key="ak_...")
     meta = client.get_meta()
@@ -29,8 +29,8 @@ from .types import (
     GeometryDO,
     Image,
     Keypoint2D,
-    Mask2D,
     PaginatedResponse,
+    Polygon2D,
     ProjectMeta,
     RotatedBox2D,
 )
@@ -40,7 +40,7 @@ __all__ = [
     # Geometry
     "Box2D",
     "RotatedBox2D",
-    "Mask2D",
+    "Polygon2D",
     "Keypoint2D",
     "GeometryDO",
     # Payload
