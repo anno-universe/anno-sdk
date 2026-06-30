@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
 
 # ---------------------------------------------------------------------------
 # Geometry data objects
@@ -314,7 +316,7 @@ class ProjectMeta:
 
 
 @dataclass
-class PaginatedResponse[T]:
+class PaginatedResponse(Generic[T]):
     """Generic offset/limit paginated response."""
 
     count: int
