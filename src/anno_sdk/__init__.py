@@ -19,6 +19,12 @@ Usage::
 from .client import Client
 from .exceptions import AnnoAPIError, AnnoConnectionError, AnnoSDKError
 from .handler import PredictFn, Predictor, serve_predict
+
+try:
+    from .server import InferenceServer, create_app
+except ImportError:  # pragma: no cover — server extras not installed
+    InferenceServer = None  # type: ignore[assignment,misc]
+    create_app = None  # type: ignore[assignment,misc]
 from .inference import InferenceRequestMeta, InferenceResponse
 from .types import (
     Annotation,
@@ -58,6 +64,9 @@ __all__ = [
     "Predictor",
     "serve_predict",
     "PredictFn",
+    # Server (available when installed with anno-sdk[server])
+    "InferenceServer",
+    "create_app",
     # Exceptions
     "AnnoSDKError",
     "AnnoAPIError",
