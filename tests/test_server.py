@@ -100,7 +100,7 @@ class TestHealth:
 class TestPredict:
     def test_returns_annotations(self) -> None:
         c = _make_client()
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {}, "requested_types": ["box"]}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": ["box"]}
         r = c.post(
             "/predict",
             files={"image": ("a.png", b"\x89PNG", "image/png")},
@@ -113,7 +113,7 @@ class TestPredict:
 
     def test_response_is_re_parseable(self) -> None:
         c = _make_client()
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {}, "requested_types": ["box"]}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": ["box"]}
         r = c.post(
             "/predict",
             files={"image": ("a.png", b"\x89PNG", "image/png")},
@@ -132,7 +132,7 @@ class TestPredict:
                 return []
 
         c = _make_client(_Capture())
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {}, "requested_types": []}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": []}
         c.post(
             "/predict",
             files={"image": ("a.png", b"\x89PNG-bytes", "image/png")},
@@ -149,7 +149,7 @@ class TestPredict:
                 return []
 
         c = _make_client(_DimCapture())
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {"a": 0}, "requested_types": ["box"]}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {"a": 0}, "requested_types": ["box"]}
         c.post(
             "/predict",
             files={"image": ("a.png", b"", "image/png")},
@@ -175,7 +175,7 @@ class TestPredict:
 
     def test_predict_failure_returns_500(self) -> None:
         c = _make_client(_FailingPredictor())
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {}, "requested_types": ["box"]}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": ["box"]}
         r = c.post(
             "/predict",
             files={"image": ("a.png", b"x", "image/png")},
@@ -208,7 +208,7 @@ class TestAuth:
 
     def test_predict_with_correct_auth_succeeds(self) -> None:
         c = _make_client(auth_header="X-API-Key", auth_header_value="s3cr3t")
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {}, "requested_types": ["box"]}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": ["box"]}
         r = c.post(
             "/predict",
             files={"image": ("a.png", b"\x89PNG", "image/png")},
@@ -228,7 +228,7 @@ class TestAuth:
 
     def test_query_auth(self) -> None:
         c = _make_client(auth_query="token", auth_query_value="tok123")
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {}, "requested_types": ["box"]}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": ["box"]}
 
         # correct
         r = c.post(
@@ -255,7 +255,7 @@ class TestAuth:
             auth_header="X-API-Key", auth_header_value="hdr",
             auth_query="token", auth_query_value="tok",
         )
-        meta = {"image_id": 1, "job_id": 2, "label_mapping": {}, "requested_types": ["box"]}
+        meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": ["box"]}
         # both present and correct
         r = c.post(
             "/predict?token=tok",

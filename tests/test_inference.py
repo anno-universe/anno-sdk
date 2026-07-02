@@ -66,7 +66,7 @@ class TestInferenceRequestMeta:
     def test_roundtrip(self) -> None:
         meta = InferenceRequestMeta(
             image_id=42,
-            job_id=7,
+            task_id=7,
             label_mapping={"cat": 0, "dog": 1},
             requested_types=["box", "polygon"],
             width=1920,
@@ -77,7 +77,7 @@ class TestInferenceRequestMeta:
         assert restored == meta
 
     def test_from_dict_tolerates_missing_optionals(self) -> None:
-        meta = InferenceRequestMeta.from_dict({"image_id": 1, "job_id": 2})
+        meta = InferenceRequestMeta.from_dict({"image_id": 1, "task_id": 2})
         assert meta.label_mapping == {}
         assert meta.requested_types == []
         assert meta.width is None and meta.client_ref is None
@@ -124,7 +124,7 @@ class TestServePredict:
             return [Annotation.from_geometry(Box2D(0, 0, 10, 10), label=meta.requested_types and 1)]
 
         metadata = InferenceRequestMeta(
-            image_id=1, job_id=2, label_mapping={}, requested_types=["box"]
+            image_id=1, task_id=2, label_mapping={}, requested_types=["box"]
         ).to_dict()
 
         body = serve_predict(b"\x89PNG-bytes", metadata, predict)
@@ -152,7 +152,7 @@ class TestPredictor:
                 return [Annotation.from_geometry(Box2D(0, 0, 10, 10), label=1)]
 
         metadata = InferenceRequestMeta(
-            image_id=1, job_id=2, label_mapping={}, requested_types=["box"]
+            image_id=1, task_id=2, label_mapping={}, requested_types=["box"]
         ).to_dict()
 
         body = MyModel().serve(b"\x89PNG-bytes", metadata)
@@ -164,7 +164,7 @@ class TestPredictor:
 
     def test_base_predict_not_implemented(self) -> None:
         metadata = InferenceRequestMeta(
-            image_id=1, job_id=2, label_mapping={}, requested_types=[]
+            image_id=1, task_id=2, label_mapping={}, requested_types=[]
         ).to_dict()
         try:
             Predictor().serve(b"x", metadata)
@@ -185,7 +185,7 @@ class TestPredictor:
                 return []
 
         metadata = InferenceRequestMeta(
-            image_id=1, job_id=2, label_mapping={}, requested_types=[]
+            image_id=1, task_id=2, label_mapping={}, requested_types=[]
         ).to_dict()
         model = Counting()
         model.serve(b"a", metadata)
@@ -206,7 +206,7 @@ class TestPredictor:
                 return []
 
         metadata = InferenceRequestMeta(
-            image_id=1, job_id=2, label_mapping={}, requested_types=[]
+            image_id=1, task_id=2, label_mapping={}, requested_types=[]
         ).to_dict()
         model = NoSuper()
         model.serve(b"a", metadata)
@@ -231,7 +231,7 @@ class TestPredictor:
                 return [*annotations, Annotation(label=2, geometry=Box2D(0, 0, 2, 2))]
 
         metadata = InferenceRequestMeta(
-            image_id=1, job_id=2, label_mapping={}, requested_types=[]
+            image_id=1, task_id=2, label_mapping={}, requested_types=[]
         ).to_dict()
         body = Hooked().serve(b"img", metadata)
 

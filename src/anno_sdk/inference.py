@@ -15,7 +15,7 @@ Request ``metadata`` part::
 
     {
         "image_id": 42,
-        "job_id": 7,
+        "task_id": 7,
         "label_mapping": {"cat": 0, "dog": 1},
         "requested_types": ["box", "polygon"],
         "width": 1920,
@@ -52,7 +52,7 @@ class InferenceRequestMeta:
     """
 
     image_id: int
-    job_id: int
+    task_id: int
     label_mapping: dict
     requested_types: list[str]
     width: int | None = None
@@ -62,7 +62,7 @@ class InferenceRequestMeta:
     def to_dict(self) -> dict:
         return {
             "image_id": self.image_id,
-            "job_id": self.job_id,
+            "task_id": self.task_id,
             "label_mapping": self.label_mapping,
             "requested_types": list(self.requested_types),
             "width": self.width,
@@ -74,7 +74,7 @@ class InferenceRequestMeta:
     def from_dict(cls, data: dict) -> InferenceRequestMeta:
         return cls(
             image_id=data["image_id"],
-            job_id=data["job_id"],
+            task_id=data["task_id"],
             label_mapping=data.get("label_mapping") or {},
             requested_types=list(data.get("requested_types") or []),
             width=data.get("width"),
