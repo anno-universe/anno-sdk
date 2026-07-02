@@ -25,7 +25,22 @@ try:
 except ImportError:  # pragma: no cover — server extras not installed
     InferenceServer = None  # type: ignore[assignment,misc]
     create_app = None  # type: ignore[assignment,misc]
+# InteractivePredictor + server: predictor base has no web-framework deps
+# (subclass it anywhere); constructing the server requires anno-sdk[server].
 from .inference import InferenceRequestMeta, InferenceResponse
+from .interactive import (
+    PROMPT_TYPES,
+    InteractiveInferenceRequestMeta,
+    InteractiveInferenceResponse,
+    InteractiveSessionCreateRequest,
+    InteractiveSessionCreateResponse,
+)
+from .interactive_server import (
+    InteractiveInferenceServer,
+    InteractivePredictor,
+    SessionStore,
+    create_interactive_app,
+)
 from .types import (
     Annotation,
     AnnotationBatchResult,
@@ -61,6 +76,17 @@ __all__ = [
     # Server-driven inference contract
     "InferenceRequestMeta",
     "InferenceResponse",
+    # Interactive inference contract
+    "InteractiveInferenceRequestMeta",
+    "InteractiveInferenceResponse",
+    "InteractiveSessionCreateRequest",
+    "InteractiveSessionCreateResponse",
+    "PROMPT_TYPES",
+    # Interactive server (base class dep-free; server needs anno-sdk[server])
+    "InteractivePredictor",
+    "InteractiveInferenceServer",
+    "create_interactive_app",
+    "SessionStore",
     "Predictor",
     "serve_predict",
     "PredictFn",

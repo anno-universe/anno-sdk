@@ -1,6 +1,6 @@
 [project]
 name = "anno-sdk"
-version = "0.2.0"
+version = "0.3.0"
 description = "Python SDK for the Anno annotation platform inference API"
 readme = "README.md"
 authors = [{ name = "Cam", email = "yulinfeng000@gmail.com" }]
@@ -16,6 +16,7 @@ server = [
 ]
 [project.scripts]
 anno-serve = "anno_sdk.server:main"
+anno-serve-interactive = "anno_sdk.interactive_server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12.0"]
