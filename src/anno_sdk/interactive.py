@@ -22,11 +22,13 @@ a separate multipart part (``image``); this module only models the JSON parts.
 
 Prompt types
 ------------
-``box``, ``positive_point``, ``negative_point``, ``mask``, ``text``. Prompts are
-carried as a list of plain dicts, each tagged with ``"type"``; the remaining keys
+``box``, ``positive_point``, ``negative_point``, ``mask``, ``text``. On the wire
+prompts are a list of plain dicts, each tagged with ``"type"``; the remaining keys
 are prompt-specific (e.g. a box's ``x/y/width/height``, a point's ``x/y``, a
-mask's ``points``/RLE, text's ``text``). Keeping prompts as open dicts lets the
-service evolve prompt payloads without a contract bump.
+mask's ``points``/RLE, text's ``text``). :class:`InteractiveInferenceRequestMeta`
+parses them into the typed :data:`~anno_sdk.prompts.Prompt` objects defined in
+:mod:`anno_sdk.prompts`, so a predictor iterates concrete objects while the wire
+format stays dict-based (and backend-compatible).
 
 Wire shapes
 -----------
@@ -61,24 +63,39 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .prompts import (
+    PROMPT_BOX,
+    PROMPT_MASK,
+    PROMPT_NEGATIVE_POINT,
+    PROMPT_POSITIVE_POINT,
+    PROMPT_TEXT,
+    PROMPT_TYPES,
+    Prompt,
+    parse_prompts,
+)
 from .types import Annotation
+
+# Re-export the prompt-type constants (their canonical home is anno_sdk.prompts)
+# so existing ``from anno_sdk.interactive import PROMPT_BOX`` imports keep working.
+__all__ = [
+    "IMAGE_PART_NAME",
+    "METADATA_PART_NAME",
+    "PROMPT_BOX",
+    "PROMPT_POSITIVE_POINT",
+    "PROMPT_NEGATIVE_POINT",
+    "PROMPT_MASK",
+    "PROMPT_TEXT",
+    "PROMPT_TYPES",
+    "InteractiveInferenceRequestMeta",
+    "InteractiveInferenceResponse",
+    "InteractiveSessionCreateRequest",
+    "InteractiveSessionCreateResponse",
+]
 
 #: Name of the multipart part carrying the raw image bytes.
 IMAGE_PART_NAME = "image"
 #: Name of the multipart part carrying the JSON metadata block.
 METADATA_PART_NAME = "metadata"
-
-#: Prompt type constants.
-PROMPT_BOX = "box"
-PROMPT_POSITIVE_POINT = "positive_point"
-PROMPT_NEGATIVE_POINT = "negative_point"
-PROMPT_MASK = "mask"
-PROMPT_TEXT = "text"
-
-#: The full set of prompt types this contract defines.
-PROMPT_TYPES = frozenset(
-    {PROMPT_BOX, PROMPT_POSITIVE_POINT, PROMPT_NEGATIVE_POINT, PROMPT_MASK, PROMPT_TEXT}
-)
 
 
 @dataclass
@@ -92,7 +109,7 @@ class InteractiveInferenceRequestMeta:
     image_id: int
     session_id: int
     step_index: int
-    prompts: list[dict]
+    prompts: list[Prompt]
     label_mapping: dict = field(default_factory=dict)
     requested_types: list[str] = field(default_factory=list)
     width: int | None = None
@@ -104,7 +121,7 @@ class InteractiveInferenceRequestMeta:
             "image_id": self.image_id,
             "session_id": self.session_id,
             "step_index": self.step_index,
-            "prompts": [dict(p) for p in self.prompts],
+            "prompts": [p.to_dict() for p in self.prompts],
             "label_mapping": self.label_mapping,
             "requested_types": list(self.requested_types),
             "width": self.width,
@@ -118,7 +135,7 @@ class InteractiveInferenceRequestMeta:
             image_id=data["image_id"],
             session_id=data["session_id"],
             step_index=data["step_index"],
-            prompts=[dict(p) for p in data.get("prompts") or []],
+            prompts=parse_prompts(data.get("prompts") or []),
             label_mapping=data.get("label_mapping") or {},
             requested_types=list(data.get("requested_types") or []),
             width=data.get("width"),

@@ -35,11 +35,21 @@ from .interactive import (
     InteractiveSessionCreateRequest,
     InteractiveSessionCreateResponse,
 )
+from .interactive_predictor import InteractivePredictor
 from .interactive_server import (
     InteractiveInferenceServer,
-    InteractivePredictor,
     SessionStore,
     create_interactive_app,
+)
+from .prompts import (
+    BoxPrompt,
+    MaskPrompt,
+    NegativePointPrompt,
+    PositivePointPrompt,
+    Prompt,
+    TextPrompt,
+    parse_prompt,
+    parse_prompts,
 )
 from .types import (
     Annotation,
@@ -82,6 +92,15 @@ __all__ = [
     "InteractiveSessionCreateRequest",
     "InteractiveSessionCreateResponse",
     "PROMPT_TYPES",
+    # Typed interactive prompts
+    "Prompt",
+    "BoxPrompt",
+    "PositivePointPrompt",
+    "NegativePointPrompt",
+    "MaskPrompt",
+    "TextPrompt",
+    "parse_prompt",
+    "parse_prompts",
     # Interactive server (base class dep-free; server needs anno-sdk[server])
     "InteractivePredictor",
     "InteractiveInferenceServer",

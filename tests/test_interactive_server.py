@@ -1,6 +1,7 @@
-"""End-to-end tests for the interactive inference server (auth + image cache)."""
+"""End-to-end tests for the interactive inference server (auth + image cache + seats)."""
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -9,9 +10,11 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from anno_sdk import (  # noqa: E402
     Annotation,
+    BoxPrompt,
     InteractiveInferenceServer,
     InteractivePredictor,
     Polygon2D,
+    SessionStore,
 )
 
 
@@ -151,3 +154,108 @@ def test_delete_session_frees_state():
         json={"image_id": 42, "session_id": 7, "step_index": 1, "prompts": []},
     )
     assert res.status_code == 401
+
+
+# -- seat / concurrency ------------------------------------------------------
+
+
+def _upload(client, session_id, token):
+    return client.post(
+        f"/{session_id}/infer_image",
+        headers={"X-Session-Token": token},
+        files={"image": ("a.png", b"bytes", "image/png")},
+    )
+
+
+def test_infer_image_no_seat_returns_429():
+    client, _ = _client()  # default max_seats=1
+    ta = _open_session(client, session_id=7).json()["token"]
+    tb = _open_session(client, session_id=8).json()["token"]
+
+    # First session takes the only seat.
+    assert _upload(client, 7, ta).status_code == 200
+    # Second session is refused with a distinct 429 / no_seat_available body.
+    refused = _upload(client, 8, tb)
+    assert refused.status_code == 429
+    assert refused.json()["detail"] == "no_seat_available"
+
+
+def test_complete_frees_seat():
+    client, _ = _client()  # default max_seats=1
+    ta = _open_session(client, session_id=7).json()["token"]
+    tb = _open_session(client, session_id=8).json()["token"]
+    assert _upload(client, 7, ta).status_code == 200
+    assert _upload(client, 8, tb).status_code == 429
+
+    # Provider releases session 7's seat via the provider-guarded complete route.
+    done = client.post("/session/7/complete", headers={"X-API-Key": "s3cr3t"})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "completed"
+
+    # Now the waiting session can take the freed seat.
+    assert _upload(client, 8, tb).status_code == 200
+
+
+def test_complete_requires_provider_credential():
+    client, _ = _client()
+    _open_session(client, session_id=7)
+    # No provider credential -> 401, seat untouched.
+    assert client.post("/session/7/complete").status_code == 401
+
+
+def test_lazy_sweep_reclaims_expired_seat():
+    store = SessionStore(max_seats=1)
+    model = _Model()
+    server = InteractiveInferenceServer(
+        model,
+        auth_header="X-API-Key",
+        auth_header_value="s3cr3t",
+        public_url="https://sam.example.com/",
+        store=store,
+    )
+    client = TestClient(server._app)
+    ta = _open_session(client, session_id=7).json()["token"]
+    tb = _open_session(client, session_id=8).json()["token"]
+
+    assert _upload(client, 7, ta).status_code == 200
+    assert _upload(client, 8, tb).status_code == 429
+
+    # Expire session 7's token; the next acquire must sweep it and reclaim the seat.
+    store._sessions["7"].expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    assert _upload(client, 8, tb).status_code == 200
+
+
+def test_predict_receives_typed_prompts():
+    captured = {}
+
+    class _TypedModel(InteractivePredictor):
+        def embed_image(self, image_bytes, meta):
+            return b"state"
+
+        def predict(self, image_state, meta):
+            captured["prompts"] = meta.prompts
+            return None
+
+    server = InteractiveInferenceServer(
+        _TypedModel(),
+        auth_header="X-API-Key",
+        auth_header_value="s3cr3t",
+        public_url="https://x/",
+    )
+    client = TestClient(server._app)
+    token = _open_session(client, session_id=7).json()["token"]
+    headers = {"X-Session-Token": token}
+    _upload(client, 7, token)
+    res = client.post(
+        "/7/predict",
+        headers=headers,
+        json={
+            "image_id": 42,
+            "session_id": 7,
+            "step_index": 1,
+            "prompts": [{"type": "box", "x": 10, "y": 20, "width": 30, "height": 40}],
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert isinstance(captured["prompts"][0], BoxPrompt)
+    assert captured["prompts"][0].width == 30

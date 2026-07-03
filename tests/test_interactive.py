@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from anno_sdk import (
     Annotation,
+    BoxPrompt,
     InteractiveInferenceRequestMeta,
     InteractiveInferenceResponse,
+    NegativePointPrompt,
     Polygon2D,
+    PositivePointPrompt,
+    TextPrompt,
 )
 
 
@@ -17,10 +21,10 @@ class TestInteractiveInferenceRequestMeta:
             session_id=7,
             step_index=3,
             prompts=[
-                {"type": "box", "x": 10, "y": 20, "width": 100, "height": 50},
-                {"type": "positive_point", "x": 55, "y": 40},
-                {"type": "negative_point", "x": 5, "y": 5},
-                {"type": "text", "text": "the cat"},
+                BoxPrompt(x=10, y=20, width=100, height=50),
+                PositivePointPrompt(x=55, y=40),
+                NegativePointPrompt(x=5, y=5),
+                TextPrompt(text="the cat"),
             ],
             label_mapping={"cat": 0},
             requested_types=["polygon"],
@@ -28,8 +32,13 @@ class TestInteractiveInferenceRequestMeta:
             height=1080,
             client_ref="ref-1",
         )
-        restored = InteractiveInferenceRequestMeta.from_dict(meta.to_dict())
+        wire = meta.to_dict()
+        # Wire stays dict-based & backend-compatible (type-tagged dicts).
+        assert wire["prompts"][0] == {"type": "box", "x": 10, "y": 20, "width": 100, "height": 50}
+        # ...but from_dict rebuilds typed Prompt objects, so the roundtrip is faithful.
+        restored = InteractiveInferenceRequestMeta.from_dict(wire)
         assert restored == meta
+        assert isinstance(restored.prompts[0], BoxPrompt)
 
     def test_from_dict_tolerates_missing_optionals(self) -> None:
         meta = InteractiveInferenceRequestMeta.from_dict(

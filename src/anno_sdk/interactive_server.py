@@ -18,10 +18,12 @@ Three roles, two credentials:
     token + ``predict_url`` to the browser.
 
 ``POST /{session_id}/infer_image`` — called **by the browser once**, guarded by
-    the session token. Uploads the image (multipart ``image``); the server
-    caches it and runs :meth:`InteractivePredictor.embed_image` a single time so
-    subsequent prompts are cheap. This is the whole point of the session: the
-    frontend does not re-upload the image on every prompt.
+    the session token. Uploads the image (multipart ``image``); the server takes
+    a concurrency **seat** and runs :meth:`InteractivePredictor.embed_image` a
+    single time so subsequent prompts are cheap. This is the whole point of the
+    session: the frontend does not re-upload the image on every prompt. If every
+    seat is occupied the call returns **429** (``{"detail": "no_seat_available"}``)
+    so the frontend can cancel the session with the Anno server.
 
 ``POST /{session_id}/predict`` — called **by the browser per prompt**, guarded by
     the session token. Body is an :class:`~anno_sdk.InteractiveInferenceRequestMeta`
@@ -29,8 +31,13 @@ Three roles, two credentials:
     against the cached image state and returns an
     :class:`~anno_sdk.InteractiveInferenceResponse`.
 
-``DELETE /{session_id}`` — optional; the browser may release the cached image
-    when it commits or discards. Sessions also expire on their own via the TTL.
+``POST /session/{session_id}/complete`` — called **by the Anno server**, guarded
+    by the *provider credential* (same as ``/session``). Releases the session's
+    seat and evicts its cached image once the session is committed / discarded.
+
+``DELETE /{session_id}`` — optional; the browser may release its seat + cached
+    image early. Seats are also reclaimed lazily on token expiry / idle timeout
+    (see :class:`SessionStore`).
 
 The service author subclasses :class:`InteractivePredictor` (override
 ``embed_image`` to precompute an embedding, ``predict`` to run prompts) and runs::
@@ -54,13 +61,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from .interactive import (
-    InteractiveInferenceRequestMeta,
-    InteractiveInferenceResponse,
     InteractiveSessionCreateRequest,
     InteractiveSessionCreateResponse,
 )
+from .interactive_predictor import InteractivePredictor
 from .server import _make_auth_dep, _require_server_extras
-from .types import Annotation
 
 logger = logging.getLogger("anno_sdk.interactive_server")
 
@@ -80,107 +85,46 @@ ResponseDict = dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
-# InteractivePredictor — the only thing a service author implements
-# ---------------------------------------------------------------------------
-
-
-class InteractivePredictor:
-    """Model logic for interactive (prompt-driven) inference.
-
-    Lifecycle per session::
-
-        setup()                      # once per process, before first use
-        embed_image(bytes, meta)     # once per session, on /infer_image
-        predict(state, meta)         # per prompt, on /predict  (override this)
-
-    Only :meth:`predict` is required. Override :meth:`embed_image` to precompute
-    an embedding (its return value is cached as ``state`` and handed to every
-    :meth:`predict`); by default the raw image bytes are cached. Override
-    :meth:`setup` to load model weights once.
-    """
-
-    def setup(self) -> None:
-        """One-time initialization (e.g. load weights). Runs once, lazily."""
-
-    def embed_image(self, image_bytes: bytes, meta: dict | None):
-        """Turn the uploaded image into the cached per-session ``state``.
-
-        Runs once per session (on ``/infer_image``). Return whatever
-        :meth:`predict` needs — an embedding tensor, a wrapper object, or (by
-        default) the raw bytes. ``meta`` is the optional JSON block the frontend
-        sent alongside the image, or ``None``.
-        """
-        return image_bytes
-
-    def predict(
-        self, image_state, meta: InteractiveInferenceRequestMeta
-    ) -> InteractiveInferenceResponse | Annotation | None:
-        """Run the prompts in ``meta`` against the cached ``image_state``.
-
-        **Must be overridden.** Return an :class:`InteractiveInferenceResponse`,
-        or a bare :class:`~anno_sdk.types.Annotation` (wrapped automatically), or
-        ``None`` when the prompts yield no candidate.
-        """
-        raise NotImplementedError("InteractivePredictor subclasses must implement predict()")
-
-    # -- internals -----------------------------------------------------------
-
-    def _ensure_setup(self) -> None:
-        if not getattr(self, "_is_setup", False):
-            self.setup()
-            self._is_setup = True
-
-    def embed(self, image_bytes: bytes, meta: dict | None):
-        self._ensure_setup()
-        return self.embed_image(image_bytes, meta)
-
-    def serve_predict(self, image_state, metadata: dict) -> dict:
-        """Run :meth:`predict` for one prompt step and return the wire body."""
-        self._ensure_setup()
-        meta = InteractiveInferenceRequestMeta.from_dict(metadata)
-        out = self.predict(image_state, meta)
-        return _normalize_candidate(out).to_dict()
-
-
-def _normalize_candidate(out) -> InteractiveInferenceResponse:
-    if out is None:
-        return InteractiveInferenceResponse()
-    if isinstance(out, InteractiveInferenceResponse):
-        return out
-    if isinstance(out, Annotation):
-        return InteractiveInferenceResponse(annotation=out)
-    raise TypeError(
-        "predict() must return InteractiveInferenceResponse, Annotation, or None; "
-        f"got {type(out).__name__}"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Session store — token + cached image state, keyed by session_id
 # ---------------------------------------------------------------------------
 
 
 class _Session:
-    __slots__ = ("token", "expires_at", "image_state", "has_image")
+    __slots__ = ("token", "expires_at", "image_state", "has_image", "has_seat", "last_active")
 
-    def __init__(self, token: str, expires_at: datetime) -> None:
+    def __init__(self, token: str, expires_at: datetime, now: datetime) -> None:
         self.token = token
         self.expires_at = expires_at
         self.image_state: Any = None
         self.has_image = False
+        self.has_seat = False
+        self.last_active = now
 
 
 class SessionStore:
-    """In-memory session store (token + cached image state).
+    """In-memory session store (token + cached image state + concurrency seats).
+
+    A *seat* is a concurrency slot for the expensive per-session resources (the
+    GPU / image embedding). At most ``max_seats`` sessions may hold one at once.
+    A seat is taken lazily — when the frontend uploads its image
+    (``/infer_image``), not at token-mint time — and released on completion,
+    frontend ``DELETE``, or by the lazy sweep below.
+
+    **Lazy cleanup (懒清理):** there is no background reaper. On every
+    :meth:`acquire_seat` the store first sweeps sessions whose token has expired
+    or which have been idle past ``idle_timeout_seconds``, reclaiming their seats
+    and cached images before deciding whether a seat is free.
 
     Thread-safe for a single process. For multi-worker / multi-replica
-    deployments, subclass and override the four methods to share state (Redis,
-    a DB, etc.); the server calls only these.
+    deployments, subclass and override these methods to share state (Redis, a DB,
+    etc.); the server calls only these.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_seats: int = 1, idle_timeout_seconds: int | None = None) -> None:
         self._lock = threading.Lock()
         self._sessions: dict[str, _Session] = {}
+        self.max_seats = max_seats
+        self.idle_timeout_seconds = idle_timeout_seconds
 
     @staticmethod
     def _now() -> datetime:
@@ -188,9 +132,10 @@ class SessionStore:
 
     def create(self, session_id: str, ttl_seconds: int) -> tuple[str, datetime]:
         token = secrets.token_urlsafe(32)
-        expires_at = self._now() + timedelta(seconds=ttl_seconds)
+        now = self._now()
+        expires_at = now + timedelta(seconds=ttl_seconds)
         with self._lock:
-            self._sessions[session_id] = _Session(token, expires_at)
+            self._sessions[session_id] = _Session(token, expires_at, now)
         return token, expires_at
 
     def authenticate(self, session_id: str, token: str) -> _Session | None:
@@ -199,12 +144,49 @@ class SessionStore:
             sess = self._sessions.get(session_id)
             if sess is None or not token:
                 return None
-            if sess.expires_at <= self._now():
+            now = self._now()
+            if sess.expires_at <= now:
                 self._sessions.pop(session_id, None)
                 return None
             if not secrets.compare_digest(sess.token, token):
                 return None
+            sess.last_active = now
             return sess
+
+    def acquire_seat(self, session_id: str) -> bool:
+        """Reserve a seat for ``session_id``; return ``False`` if none is free.
+
+        Sweeps expired / idle sessions first (lazy cleanup), then grants a seat
+        while under capacity. Idempotent: a session that already holds a seat
+        keeps it (so a re-upload does not consume a second slot).
+        """
+        with self._lock:
+            self._sweep_locked()
+            sess = self._sessions.get(session_id)
+            if sess is None:
+                return False
+            if sess.has_seat:
+                sess.last_active = self._now()
+                return True
+            if self._occupied_locked() >= self.max_seats:
+                return False
+            sess.has_seat = True
+            sess.last_active = self._now()
+            return True
+
+    def release_seat(self, session_id: str) -> None:
+        """Free ``session_id``'s seat and evict its cached image state.
+
+        Idempotent and safe on an unknown / already-released session. The session
+        record itself is kept (its token may still authenticate) until it expires
+        or is swept; only the seat and the heavyweight image state are released.
+        """
+        with self._lock:
+            sess = self._sessions.get(session_id)
+            if sess is not None:
+                sess.has_seat = False
+                sess.has_image = False
+                sess.image_state = None
 
     def set_image(self, session_id: str, image_state: Any) -> None:
         with self._lock:
@@ -212,10 +194,27 @@ class SessionStore:
             if sess is not None:
                 sess.image_state = image_state
                 sess.has_image = True
+                sess.last_active = self._now()
 
     def delete(self, session_id: str) -> None:
         with self._lock:
             self._sessions.pop(session_id, None)
+
+    # -- internals (call only while holding ``self._lock``) ------------------
+
+    def _sweep_locked(self) -> None:
+        """Drop sessions past their token expiry or idle timeout, freeing seats."""
+        now = self._now()
+        idle = self.idle_timeout_seconds
+        for sid, sess in list(self._sessions.items()):
+            expired = sess.expires_at <= now
+            timed_out = idle is not None and sess.last_active + timedelta(seconds=idle) <= now
+            if expired or timed_out:
+                self._sessions.pop(sid, None)
+
+    def _occupied_locked(self) -> int:
+        """Number of sessions currently holding a seat."""
+        return sum(1 for sess in self._sessions.values() if sess.has_seat)
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +245,18 @@ class InteractiveInferenceServer:
         the handshake so the Anno server can relay it to the frontend. The
         frontend then calls ``{predict_url}/{session_id}/infer_image`` and
         ``{predict_url}/{session_id}/predict``.
+    max_seats:
+        Maximum number of concurrent sessions that may hold a seat (an image
+        cache / GPU slot) at once. A seat is taken on ``/infer_image``; when the
+        pool is full that call returns ``429``. Ignored when a custom ``store``
+        is supplied (configure the store directly).
+    idle_timeout_seconds:
+        If set, a session idle (no authenticated call) this many seconds is
+        reclaimed by the lazy sweep, freeing its seat. ``None`` disables the idle
+        sweep (seats then free only on token expiry, completion, or ``DELETE``).
     store:
         A :class:`SessionStore` (or subclass for shared state). Defaults to an
-        in-memory store.
+        in-memory store built from ``max_seats`` / ``idle_timeout_seconds``.
     """
 
     def __init__(
@@ -264,6 +272,8 @@ class InteractiveInferenceServer:
         token_ttl_seconds: int = 3600,
         token_header: str = "X-Session-Token",
         public_url: str | None = None,
+        max_seats: int = 1,
+        idle_timeout_seconds: int | None = None,
         store: SessionStore | None = None,
     ) -> None:
         _require_server_extras()
@@ -274,7 +284,9 @@ class InteractiveInferenceServer:
         self.token_ttl_seconds = token_ttl_seconds
         self.token_header = token_header
         self.public_url = public_url.rstrip("/") if public_url else None
-        self.store = store or SessionStore()
+        self.store = store or SessionStore(
+            max_seats=max_seats, idle_timeout_seconds=idle_timeout_seconds
+        )
         self._session_auth_dep = _make_auth_dep(
             auth_header, auth_header_value, auth_query, auth_query_value
         )
@@ -338,7 +350,15 @@ class InteractiveInferenceServer:
                 predict_url=self.public_url,
             ).to_dict()
 
-        # /{session_id}/infer_image — token guarded; cache + embed once.
+        # /session/{session_id}/complete — provider-credential guarded; release seat.
+        # Called by the Anno server when the session is committed or discarded so
+        # the seat is freed promptly instead of waiting for the token TTL.
+        @app.post("/session/{session_id}/complete", **session_kwargs)
+        async def complete_session(session_id: str) -> ResponseDict:
+            store.release_seat(session_id)
+            return {"status": "completed", "session_id": session_id}
+
+        # /{session_id}/infer_image — token guarded; take a seat, cache + embed once.
         @app.post("/{session_id}/infer_image")
         async def infer_image(
             session_id: str,
@@ -347,6 +367,8 @@ class InteractiveInferenceServer:
             token: Annotated[str | None, Header(alias=token_header)] = None,
         ) -> ResponseDict:
             _authed_session(session_id, token)
+            if not store.acquire_seat(session_id):
+                raise HTTPException(status_code=429, detail="no_seat_available")
             image_bytes = await image.read()
             meta_dict = None
             if metadata:
@@ -359,6 +381,8 @@ class InteractiveInferenceServer:
             try:
                 state = predictor.embed(image_bytes, meta_dict)
             except Exception as exc:
+                # Release the seat we just took so a failed upload doesn't hold a slot.
+                store.release_seat(session_id)
                 logger.exception("embed_image failed for session %s", session_id)
                 raise HTTPException(status_code=500, detail=f"embed failed: {exc}") from exc
             store.set_image(session_id, state)
@@ -444,6 +468,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--token-ttl", type=int, default=3600, help="Fallback token TTL (seconds)")
     p.add_argument("--token-header", default="X-Session-Token")
     p.add_argument("--public-url", default=None, help="Browser-reachable base URL (predict_url)")
+    p.add_argument(
+        "--max-seats", type=int, default=1, help="Max concurrent sessions holding a seat"
+    )
+    p.add_argument(
+        "--idle-timeout",
+        type=int,
+        default=None,
+        help="Reclaim a session's seat after this many idle seconds (default: never)",
+    )
 
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -465,6 +498,8 @@ def main(argv: list[str] | None = None) -> None:
         token_ttl_seconds=args.token_ttl,
         token_header=args.token_header,
         public_url=args.public_url,
+        max_seats=args.max_seats,
+        idle_timeout_seconds=args.idle_timeout,
     )
     server.serve_forever()
 
