@@ -73,6 +73,7 @@ _FASTAPI_AVAILABLE = False
 try:
     import uvicorn
     from fastapi import FastAPI, Form, Header, HTTPException, UploadFile
+    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from starlette.requests import Request  # noqa: F401 — used via _make_auth_dep
 
@@ -272,6 +273,7 @@ class InteractiveInferenceServer:
         token_ttl_seconds: int = 3600,
         token_header: str = "X-Session-Token",
         public_url: str | None = None,
+        cors_origin: str | None = None,
         max_seats: int = 1,
         idle_timeout_seconds: int | None = None,
         store: SessionStore | None = None,
@@ -297,6 +299,14 @@ class InteractiveInferenceServer:
             docs_url="/docs",
             redoc_url="/redoc",
         )
+        if cors_origin:
+            self._app.add_middleware(
+                CORSMiddleware,
+                allow_origins=[cors_origin],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
         self._register_routes()
 
     # -- route registration ---------------------------------------------------
@@ -477,6 +487,11 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Reclaim a session's seat after this many idle seconds (default: never)",
     )
+    p.add_argument(
+        "--cors-origin",
+        default=None,
+        help="Allowed CORS origin for browser direct calls (e.g. 'http://localhost:5173')",
+    )
 
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -500,6 +515,7 @@ def main(argv: list[str] | None = None) -> None:
         public_url=args.public_url,
         max_seats=args.max_seats,
         idle_timeout_seconds=args.idle_timeout,
+        cors_origin=args.cors_origin,
     )
     server.serve_forever()
 
