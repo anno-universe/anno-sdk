@@ -1,7 +1,6 @@
-"""End-to-end tests for the interactive inference server (auth + image cache + seats)."""
+"""End-to-end tests for the interactive inference server (auth + image cache)."""
 
 import json
-from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -51,6 +50,14 @@ def _open_session(client, session_id=7):
         "/session",
         headers={"X-API-Key": "s3cr3t"},
         json={"session_id": session_id, "image_id": 42, "requested_types": ["polygon"]},
+    )
+
+
+def _upload(client, session_id, token):
+    return client.post(
+        f"/{session_id}/infer_image",
+        headers={"X-Session-Token": token},
+        files={"image": ("a.png", b"bytes", "image/png")},
     )
 
 
@@ -156,73 +163,11 @@ def test_delete_session_frees_state():
     assert res.status_code == 401
 
 
-# -- seat / concurrency ------------------------------------------------------
-
-
-def _upload(client, session_id, token):
-    return client.post(
-        f"/{session_id}/infer_image",
-        headers={"X-Session-Token": token},
-        files={"image": ("a.png", b"bytes", "image/png")},
-    )
-
-
-def test_infer_image_no_seat_returns_429():
-    client, _ = _client()  # default max_seats=1
-    ta = _open_session(client, session_id=7).json()["token"]
-    tb = _open_session(client, session_id=8).json()["token"]
-
-    # First session takes the only seat.
-    assert _upload(client, 7, ta).status_code == 200
-    # Second session is refused with a distinct 429 / no_seat_available body.
-    refused = _upload(client, 8, tb)
-    assert refused.status_code == 429
-    assert refused.json()["detail"] == "no_seat_available"
-
-
-def test_complete_frees_seat():
-    client, _ = _client()  # default max_seats=1
-    ta = _open_session(client, session_id=7).json()["token"]
-    tb = _open_session(client, session_id=8).json()["token"]
-    assert _upload(client, 7, ta).status_code == 200
-    assert _upload(client, 8, tb).status_code == 429
-
-    # Provider releases session 7's seat via the provider-guarded complete route.
-    done = client.post("/session/7/complete", headers={"X-API-Key": "s3cr3t"})
-    assert done.status_code == 200, done.text
-    assert done.json()["status"] == "completed"
-
-    # Now the waiting session can take the freed seat.
-    assert _upload(client, 8, tb).status_code == 200
-
-
 def test_complete_requires_provider_credential():
     client, _ = _client()
     _open_session(client, session_id=7)
-    # No provider credential -> 401, seat untouched.
+    # No provider credential -> 401.
     assert client.post("/session/7/complete").status_code == 401
-
-
-def test_lazy_sweep_reclaims_expired_seat():
-    store = SessionStore(max_seats=1)
-    model = _Model()
-    server = InteractiveInferenceServer(
-        model,
-        auth_header="X-API-Key",
-        auth_header_value="s3cr3t",
-        public_url="https://sam.example.com/",
-        store=store,
-    )
-    client = TestClient(server._app)
-    ta = _open_session(client, session_id=7).json()["token"]
-    tb = _open_session(client, session_id=8).json()["token"]
-
-    assert _upload(client, 7, ta).status_code == 200
-    assert _upload(client, 8, tb).status_code == 429
-
-    # Expire session 7's token; the next acquire must sweep it and reclaim the seat.
-    store._sessions["7"].expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    assert _upload(client, 8, tb).status_code == 200
 
 
 def test_predict_receives_typed_prompts():
