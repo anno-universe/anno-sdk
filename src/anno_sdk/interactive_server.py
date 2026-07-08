@@ -18,12 +18,10 @@ Three roles, two credentials:
     token + ``predict_url`` to the browser.
 
 ``POST /{session_id}/infer_image`` — called **by the browser once**, guarded by
-    the session token. Uploads the image (multipart ``image``); the server takes
-    a concurrency **seat** and runs :meth:`InteractivePredictor.embed_image` a
-    single time so subsequent prompts are cheap. This is the whole point of the
-    session: the frontend does not re-upload the image on every prompt. If every
-    seat is occupied the call returns **429** (``{"detail": "no_seat_available"}``)
-    so the frontend can cancel the session with the Anno server.
+    the session token. Uploads the image (multipart ``image``); the server runs
+    :meth:`InteractivePredictor.embed_image` a single time so subsequent prompts
+    are cheap. This is the whole point of the session: the frontend does not
+    re-upload the image on every prompt.
 
 ``POST /{session_id}/predict`` — called **by the browser per prompt**, guarded by
     the session token. Body is an :class:`~anno_sdk.InteractiveInferenceRequestMeta`
@@ -32,12 +30,11 @@ Three roles, two credentials:
     :class:`~anno_sdk.InteractiveInferenceResponse`.
 
 ``POST /session/{session_id}/complete`` — called **by the Anno server**, guarded
-    by the *provider credential* (same as ``/session``). Releases the session's
-    seat and evicts its cached image once the session is committed / discarded.
+    by the *provider credential* (same as ``/session``). Evicts the session's
+    cached image once the session is committed / discarded.
 
-``DELETE /{session_id}`` — optional; the browser may release its seat + cached
-    image early. Seats are also reclaimed lazily on token expiry / idle timeout
-    (see :class:`SessionStore`).
+``DELETE /{session_id}`` — optional; the browser may evict its cached image
+    early.
 
 The service author subclasses :class:`InteractivePredictor` (override
 ``embed_image`` to precompute an embedding, ``predict`` to run prompts) and runs::
@@ -91,41 +88,27 @@ ResponseDict = dict[str, Any]
 
 
 class _Session:
-    __slots__ = ("token", "expires_at", "image_state", "has_image", "has_seat", "last_active")
+    __slots__ = ("token", "expires_at", "image_state", "has_image", "last_active")
 
     def __init__(self, token: str, expires_at: datetime, now: datetime) -> None:
         self.token = token
         self.expires_at = expires_at
         self.image_state: Any = None
         self.has_image = False
-        self.has_seat = False
         self.last_active = now
 
 
 class SessionStore:
-    """In-memory session store (token + cached image state + concurrency seats).
-
-    A *seat* is a concurrency slot for the expensive per-session resources (the
-    GPU / image embedding). At most ``max_seats`` sessions may hold one at once.
-    A seat is taken lazily — when the frontend uploads its image
-    (``/infer_image``), not at token-mint time — and released on completion,
-    frontend ``DELETE``, or by the lazy sweep below.
-
-    **Lazy cleanup (懒清理):** there is no background reaper. On every
-    :meth:`acquire_seat` the store first sweeps sessions whose token has expired
-    or which have been idle past ``idle_timeout_seconds``, reclaiming their seats
-    and cached images before deciding whether a seat is free.
+    """In-memory session store (token + cached image state).
 
     Thread-safe for a single process. For multi-worker / multi-replica
     deployments, subclass and override these methods to share state (Redis, a DB,
     etc.); the server calls only these.
     """
 
-    def __init__(self, *, max_seats: int = 1, idle_timeout_seconds: int | None = None) -> None:
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._sessions: dict[str, _Session] = {}
-        self.max_seats = max_seats
-        self.idle_timeout_seconds = idle_timeout_seconds
 
     @staticmethod
     def _now() -> datetime:
@@ -154,41 +137,6 @@ class SessionStore:
             sess.last_active = now
             return sess
 
-    def acquire_seat(self, session_id: str) -> bool:
-        """Reserve a seat for ``session_id``; return ``False`` if none is free.
-
-        Sweeps expired / idle sessions first (lazy cleanup), then grants a seat
-        while under capacity. Idempotent: a session that already holds a seat
-        keeps it (so a re-upload does not consume a second slot).
-        """
-        with self._lock:
-            self._sweep_locked()
-            sess = self._sessions.get(session_id)
-            if sess is None:
-                return False
-            if sess.has_seat:
-                sess.last_active = self._now()
-                return True
-            if self._occupied_locked() >= self.max_seats:
-                return False
-            sess.has_seat = True
-            sess.last_active = self._now()
-            return True
-
-    def release_seat(self, session_id: str) -> None:
-        """Free ``session_id``'s seat and evict its cached image state.
-
-        Idempotent and safe on an unknown / already-released session. The session
-        record itself is kept (its token may still authenticate) until it expires
-        or is swept; only the seat and the heavyweight image state are released.
-        """
-        with self._lock:
-            sess = self._sessions.get(session_id)
-            if sess is not None:
-                sess.has_seat = False
-                sess.has_image = False
-                sess.image_state = None
-
     def set_image(self, session_id: str, image_state: Any) -> None:
         with self._lock:
             sess = self._sessions.get(session_id)
@@ -200,22 +148,6 @@ class SessionStore:
     def delete(self, session_id: str) -> None:
         with self._lock:
             self._sessions.pop(session_id, None)
-
-    # -- internals (call only while holding ``self._lock``) ------------------
-
-    def _sweep_locked(self) -> None:
-        """Drop sessions past their token expiry or idle timeout, freeing seats."""
-        now = self._now()
-        idle = self.idle_timeout_seconds
-        for sid, sess in list(self._sessions.items()):
-            expired = sess.expires_at <= now
-            timed_out = idle is not None and sess.last_active + timedelta(seconds=idle) <= now
-            if expired or timed_out:
-                self._sessions.pop(sid, None)
-
-    def _occupied_locked(self) -> int:
-        """Number of sessions currently holding a seat."""
-        return sum(1 for sess in self._sessions.values() if sess.has_seat)
 
 
 # ---------------------------------------------------------------------------
@@ -246,18 +178,9 @@ class InteractiveInferenceServer:
         the handshake so the Anno server can relay it to the frontend. The
         frontend then calls ``{predict_url}/{session_id}/infer_image`` and
         ``{predict_url}/{session_id}/predict``.
-    max_seats:
-        Maximum number of concurrent sessions that may hold a seat (an image
-        cache / GPU slot) at once. A seat is taken on ``/infer_image``; when the
-        pool is full that call returns ``429``. Ignored when a custom ``store``
-        is supplied (configure the store directly).
-    idle_timeout_seconds:
-        If set, a session idle (no authenticated call) this many seconds is
-        reclaimed by the lazy sweep, freeing its seat. ``None`` disables the idle
-        sweep (seats then free only on token expiry, completion, or ``DELETE``).
     store:
         A :class:`SessionStore` (or subclass for shared state). Defaults to an
-        in-memory store built from ``max_seats`` / ``idle_timeout_seconds``.
+        in-memory store.
     """
 
     def __init__(
@@ -274,8 +197,6 @@ class InteractiveInferenceServer:
         token_header: str = "X-Session-Token",
         public_url: str | None = None,
         cors_origin: str | None = None,
-        max_seats: int = 1,
-        idle_timeout_seconds: int | None = None,
         store: SessionStore | None = None,
     ) -> None:
         _require_server_extras()
@@ -286,16 +207,14 @@ class InteractiveInferenceServer:
         self.token_ttl_seconds = token_ttl_seconds
         self.token_header = token_header
         self.public_url = public_url.rstrip("/") if public_url else None
-        self.store = store or SessionStore(
-            max_seats=max_seats, idle_timeout_seconds=idle_timeout_seconds
-        )
+        self.store = store or SessionStore()
         self._session_auth_dep = _make_auth_dep(
             auth_header, auth_header_value, auth_query, auth_query_value
         )
 
         self._app = FastAPI(
             title="anno-sdk interactive inference service",
-            version="0.3.0",
+            version="0.4.0",
             docs_url="/docs",
             redoc_url="/redoc",
         )
@@ -360,15 +279,15 @@ class InteractiveInferenceServer:
                 predict_url=self.public_url,
             ).to_dict()
 
-        # /session/{session_id}/complete — provider-credential guarded; release seat.
-        # Called by the Anno server when the session is committed or discarded so
-        # the seat is freed promptly instead of waiting for the token TTL.
+        # /session/{session_id}/complete — provider-credential guarded; clean up.
+        # Called by the Anno server when the session is committed or discarded to
+        # free the cached image promptly instead of waiting for the token TTL.
         @app.post("/session/{session_id}/complete", **session_kwargs)
         async def complete_session(session_id: str) -> ResponseDict:
-            store.release_seat(session_id)
+            store.delete(session_id)
             return {"status": "completed", "session_id": session_id}
 
-        # /{session_id}/infer_image — token guarded; take a seat, cache + embed once.
+        # /{session_id}/infer_image — token guarded; cache + embed once.
         @app.post("/{session_id}/infer_image")
         async def infer_image(
             session_id: str,
@@ -377,8 +296,6 @@ class InteractiveInferenceServer:
             token: Annotated[str | None, Header(alias=token_header)] = None,
         ) -> ResponseDict:
             _authed_session(session_id, token)
-            if not store.acquire_seat(session_id):
-                raise HTTPException(status_code=429, detail="no_seat_available")
             image_bytes = await image.read()
             meta_dict = None
             if metadata:
@@ -391,8 +308,6 @@ class InteractiveInferenceServer:
             try:
                 state = predictor.embed(image_bytes, meta_dict)
             except Exception as exc:
-                # Release the seat we just took so a failed upload doesn't hold a slot.
-                store.release_seat(session_id)
                 logger.exception("embed_image failed for session %s", session_id)
                 raise HTTPException(status_code=500, detail=f"embed failed: {exc}") from exc
             store.set_image(session_id, state)
@@ -479,15 +394,6 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--token-header", default="X-Session-Token")
     p.add_argument("--public-url", default=None, help="Browser-reachable base URL (predict_url)")
     p.add_argument(
-        "--max-seats", type=int, default=1, help="Max concurrent sessions holding a seat"
-    )
-    p.add_argument(
-        "--idle-timeout",
-        type=int,
-        default=None,
-        help="Reclaim a session's seat after this many idle seconds (default: never)",
-    )
-    p.add_argument(
         "--cors-origin",
         default=None,
         help="Allowed CORS origin for browser direct calls (e.g. 'http://localhost:5173')",
@@ -513,8 +419,6 @@ def main(argv: list[str] | None = None) -> None:
         token_ttl_seconds=args.token_ttl,
         token_header=args.token_header,
         public_url=args.public_url,
-        max_seats=args.max_seats,
-        idle_timeout_seconds=args.idle_timeout,
         cors_origin=args.cors_origin,
     )
     server.serve_forever()
