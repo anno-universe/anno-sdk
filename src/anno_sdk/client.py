@@ -165,11 +165,7 @@ class Client:
         return Image.from_dict(data)
 
     def get_image_file(self, image_id: int) -> bytes:
-        """Download the original image file bytes.
-
-        In production the backend may return a 307 redirect to S3; ``httpx``
-        follows it by default.
-        """
+        """Download the original image file bytes."""
         response = self._http.get(
             f"/api/infers/project/images/{image_id}/original_file"
         )
