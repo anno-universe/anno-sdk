@@ -277,7 +277,6 @@ class Image:
     file_name: str
     width: int | None
     height: int | None
-    file_url: str
 
     @classmethod
     def from_dict(cls, data: dict) -> Image:
@@ -286,7 +285,6 @@ class Image:
             file_name=data["file_name"],
             width=data.get("width"),
             height=data.get("height"),
-            file_url=data["file_url"],
         )
 
 

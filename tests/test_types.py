@@ -183,14 +183,12 @@ class TestImage:
             "file_name": "cat.jpg",
             "width": 640,
             "height": 480,
-            "file_url": "http://localhost:8000/api/infers/project/images/1/original_file",
         }
         img = Image.from_dict(data)
         assert img.id == 1
         assert img.file_name == "cat.jpg"
         assert img.width == 640
         assert img.height == 480
-        assert "original_file" in img.file_url
 
     def test_from_dict_width_height_nullable(self) -> None:
         data = {
@@ -198,7 +196,6 @@ class TestImage:
             "file_name": "dog.png",
             "width": None,
             "height": None,
-            "file_url": "http://localhost/file",
         }
         img = Image.from_dict(data)
         assert img.width is None
@@ -232,8 +229,8 @@ class TestPaginatedResponse:
             "limit": 100,
             "offset": 0,
             "items": [
-                {"id": 1, "file_name": "a.jpg", "width": 100, "height": 100, "file_url": "http://x"},
-                {"id": 2, "file_name": "b.jpg", "width": 200, "height": 200, "file_url": "http://y"},
+                {"id": 1, "file_name": "a.jpg", "width": 100, "height": 100},
+                {"id": 2, "file_name": "b.jpg", "width": 200, "height": 200},
             ],
         }
         page = PaginatedResponse.from_dict(data, item_factory=Image.from_dict)

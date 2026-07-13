@@ -33,7 +33,7 @@ All endpoints are under `{base_url}/api/infers/project` and authenticate via `X-
 ### Image response shape
 
 ```python
-{"id": int, "file_name": str, "width": int|null, "height": int|null, "file_url": str}
+{"id": int, "file_name": str, "width": int|null, "height": int|null}
 ```
 
 ### Annotation submission (POST body)

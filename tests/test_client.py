@@ -79,11 +79,9 @@ def test_get_meta_unauthorized(client: Client, httpx_mock: HTTPXMock) -> None:
 # ---------------------------------------------------------------------------
 
 
-_F1 = f"{BASE_URL}/api/infers/project/images/1/original_file"
-_F2 = f"{BASE_URL}/api/infers/project/images/2/original_file"
 IMAGE_ITEMS = [
-    {"id": 1, "file_name": "a.jpg", "width": 640, "height": 480, "file_url": _F1},
-    {"id": 2, "file_name": "b.jpg", "width": 800, "height": 600, "file_url": _F2},
+    {"id": 1, "file_name": "a.jpg", "width": 640, "height": 480},
+    {"id": 2, "file_name": "b.jpg", "width": 800, "height": 600},
 ]
 
 
@@ -161,7 +159,6 @@ def test_iter_images_multi_page(client: Client, httpx_mock: HTTPXMock) -> None:
                     "file_name": "c.jpg",
                     "width": 100,
                     "height": 100,
-                    "file_url": f"{BASE_URL}/api/infers/project/images/3/original_file",
                 },
             ],
         },
@@ -185,7 +182,6 @@ def test_iter_images_empty(client: Client, httpx_mock: HTTPXMock) -> None:
 
 
 def test_get_image(client: Client, httpx_mock: HTTPXMock) -> None:
-    _fu = f"{BASE_URL}/api/infers/project/images/42/original_file"
     httpx_mock.add_response(
         url=f"{BASE_URL}/api/infers/project/images/42",
         json={
@@ -193,7 +189,6 @@ def test_get_image(client: Client, httpx_mock: HTTPXMock) -> None:
             "file_name": "cat.png",
             "width": 300,
             "height": 200,
-            "file_url": _fu,
         },
     )
     img = client.get_image(42)
