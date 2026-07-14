@@ -8,6 +8,7 @@ The user subclasses :class:`~anno_sdk.Predictor` and passes it (or a
 ``module:ClassName`` path) to ``anno-serve``::
 
     anno-serve --predictor my_package:MyPredictor --port 8080
+    anno-serve --predictor my_package:MyPredictor --port 8080 --cors-origin '*'
 
 Endpoints
 ---------
@@ -20,6 +21,7 @@ Features
 * Optional service-side auth via ``--auth-header`` / ``--auth-query``,
   mirroring ``InferenceServiceProvider.auth_*``.
 * ``/ready`` endpoint (checks predictor has been ``setup()`` successfully).
+* Optional CORS support via ``--cors-origin`` / ``CORS_ORIGIN`` env var.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from typing import Annotated, Any
 
@@ -43,6 +46,7 @@ logger = logging.getLogger("anno_sdk.server")
 _FASTAPI_AVAILABLE = False
 try:
     from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile  # noqa: F811
+    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from starlette.requests import Request  # injected by FastAPI Depends
 
@@ -121,6 +125,9 @@ class InferenceServer:
     auth_query / auth_query_value:
         If set, require a query parameter with the given value.
         Mirrors ``InferenceServiceProvider.auth_type="query"``.
+    cors_origin:
+        If set, add CORS middleware allowing the given origin (e.g. ``"*"`` or
+        ``"http://localhost:5173"``). Also settable via ``CORS_ORIGIN`` env var.
 
     Example::
 
@@ -144,6 +151,7 @@ class InferenceServer:
         auth_header_value: str | None = None,
         auth_query: str | None = None,
         auth_query_value: str | None = None,
+        cors_origin: str | None = None,
     ) -> None:
         _require_server_extras()
 
@@ -160,6 +168,14 @@ class InferenceServer:
             docs_url="/docs",
             redoc_url="/redoc",
         )
+        if cors_origin:
+            self._app.add_middleware(
+                CORSMiddleware,
+                allow_origins=[cors_origin],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
         self._register_routes()
 
     # -- route registration ---------------------------------------------------
@@ -285,6 +301,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Expected query value (requires --auth-query)",
     )
 
+    p.add_argument(
+        "--cors-origin", default=os.environ.get("CORS_ORIGIN"),
+        help="Allowed CORS origin (e.g. '*' or 'http://localhost:5173'). "
+             "Also settable via CORS_ORIGIN env var.",
+    )
+
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -303,6 +325,7 @@ def main(argv: list[str] | None = None) -> None:
         auth_header_value=args.auth_header_value,
         auth_query=args.auth_query,
         auth_query_value=args.auth_query_value,
+        cors_origin=args.cors_origin,
     )
     server.serve_forever()
 
