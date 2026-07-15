@@ -82,9 +82,16 @@ def test_session_mints_token_and_predict_url():
 def test_predict_requires_valid_token():
     client, _ = _client()
     _open_session(client)
-    res = client.post("/7/predict", headers={"X-Session-Token": "wrong"}, json={
-        "image_id": 42, "session_id": 7, "step_index": 1, "prompts": [],
-    })
+    res = client.post(
+        "/7/predict",
+        headers={"X-Session-Token": "wrong"},
+        json={
+            "image_id": 42,
+            "session_id": 7,
+            "step_index": 1,
+            "prompts": [],
+        },
+    )
     assert res.status_code == 401
 
 

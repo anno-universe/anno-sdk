@@ -53,7 +53,9 @@ class _FailingSetupPredictor(Predictor):
 
 
 def _make_client(predictor=None, **server_kwargs):
-    srv = InferenceServer(predictor or _EchoPredictor(), host="127.0.0.1", port=8000, **server_kwargs)
+    srv = InferenceServer(
+        predictor or _EchoPredictor(), host="127.0.0.1", port=8000, **server_kwargs
+    )
     return TestClient(srv._app)
 
 
@@ -252,8 +254,10 @@ class TestAuth:
 
     def test_both_header_and_query_auth(self) -> None:
         c = _make_client(
-            auth_header="X-API-Key", auth_header_value="hdr",
-            auth_query="token", auth_query_value="tok",
+            auth_header="X-API-Key",
+            auth_header_value="hdr",
+            auth_query="token",
+            auth_query_value="tok",
         )
         meta = {"image_id": 1, "task_id": 2, "label_mapping": {}, "requested_types": ["box"]}
         # both present and correct
@@ -300,9 +304,7 @@ class TestCLIImport:
         assert isinstance(pred, Predictor)
 
     def test_from_module_instance(self) -> None:
-        pred = _import_predictor(
-            "tests.test_server:_EchoPredictor()"
-        )
+        pred = _import_predictor("tests.test_server:_EchoPredictor()")
         assert isinstance(pred, _EchoPredictor)
 
     def test_invalid_spec_raises(self) -> None:

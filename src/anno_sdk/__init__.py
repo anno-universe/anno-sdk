@@ -18,6 +18,7 @@ Usage::
 
 from .client import Client
 from .exceptions import AnnoAPIError, AnnoConnectionError, AnnoSDKError
+from .exports import to_coco, to_yolo
 from .handler import PredictFn, Predictor, serve_predict
 
 try:
@@ -83,6 +84,9 @@ __all__ = [
     "AnnotationBatchResult",
     "AnnotationResultItem",
     "AnnotationModifyResult",
+    # Export helpers
+    "to_coco",
+    "to_yolo",
     # Server-driven inference contract
     "InferenceRequestMeta",
     "InferenceResponse",

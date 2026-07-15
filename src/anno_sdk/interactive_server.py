@@ -348,14 +348,14 @@ class InteractiveInferenceServer:
     def serve_forever(self) -> None:
         logger.info(
             "anno-serve-interactive on http://%s:%d, session-auth=%s, docs=/docs",
-            self.host, self.port, "on" if self._session_auth_dep else "off",
+            self.host,
+            self.port,
+            "on" if self._session_auth_dep else "off",
         )
         uvicorn.run(self._app, host=self.host, port=self.port, log_config=None)
 
 
-def create_interactive_app(
-    predictor: InteractivePredictor, **kwargs
-) -> InteractiveInferenceServer:
+def create_interactive_app(predictor: InteractivePredictor, **kwargs) -> InteractiveInferenceServer:
     """Convenience alias for ``InteractiveInferenceServer(predictor, **kwargs)``."""
     return InteractiveInferenceServer(predictor, **kwargs)
 
