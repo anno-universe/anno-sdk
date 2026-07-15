@@ -54,7 +54,7 @@ META_RESPONSE = {
 
 def test_get_meta(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/meta",
+        url=f"{BASE_URL}/api/project-api/meta",
         json=META_RESPONSE,
     )
     meta = client.get_meta()
@@ -65,7 +65,7 @@ def test_get_meta(client: Client, httpx_mock: HTTPXMock) -> None:
 
 def test_get_meta_unauthorized(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/meta",
+        url=f"{BASE_URL}/api/project-api/meta",
         status_code=401,
         text="Unauthorized",
     )
@@ -87,7 +87,7 @@ IMAGE_ITEMS = [
 
 def test_paginate_images(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=re.compile(rf"^{re.escape(BASE_URL)}/api/infers/project/images(\?.*)?$"),
+        url=re.compile(rf"^{re.escape(BASE_URL)}/api/project-api/images(\?.*)?$"),
         json={"count": 2, "limit": 100, "offset": 0, "items": IMAGE_ITEMS},
     )
     page = client.paginate_images()
@@ -100,7 +100,7 @@ def test_paginate_images(client: Client, httpx_mock: HTTPXMock) -> None:
 
 def test_paginate_images_with_filter(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=re.compile(rf"^{re.escape(BASE_URL)}/api/infers/project/images(\?.*)?$"),
+        url=re.compile(rf"^{re.escape(BASE_URL)}/api/project-api/images(\?.*)?$"),
         json={"count": 0, "limit": 50, "offset": 10, "items": []},
     )
     page = client.paginate_images(limit=50, offset=10, has_active_annotations=True)
@@ -113,7 +113,7 @@ def test_paginate_images_with_filter(client: Client, httpx_mock: HTTPXMock) -> N
 
 def test_paginate_images_exclude_annotated(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=re.compile(rf"^{re.escape(BASE_URL)}/api/infers/project/images(\?.*)?$"),
+        url=re.compile(rf"^{re.escape(BASE_URL)}/api/project-api/images(\?.*)?$"),
         json={"count": 0, "limit": 100, "offset": 0, "items": []},
     )
     client.paginate_images(has_active_annotations=False)
@@ -126,7 +126,7 @@ def test_paginate_images_exclude_annotated(client: Client, httpx_mock: HTTPXMock
 # ---------------------------------------------------------------------------
 
 
-_IMAGES_URL = re.compile(rf"^{re.escape(BASE_URL)}/api/infers/project/images(\?.*)?$")
+_IMAGES_URL = re.compile(rf"^{re.escape(BASE_URL)}/api/project-api/images(\?.*)?$")
 
 
 def test_iter_images_single_page(client: Client, httpx_mock: HTTPXMock) -> None:
@@ -183,7 +183,7 @@ def test_iter_images_empty(client: Client, httpx_mock: HTTPXMock) -> None:
 
 def test_get_image(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/images/42",
+        url=f"{BASE_URL}/api/project-api/images/42",
         json={
             "id": 42,
             "file_name": "cat.png",
@@ -197,7 +197,7 @@ def test_get_image(client: Client, httpx_mock: HTTPXMock) -> None:
 
 
 def test_get_image_not_found(client: Client, httpx_mock: HTTPXMock) -> None:
-    httpx_mock.add_response(url=f"{BASE_URL}/api/infers/project/images/999", status_code=404)
+    httpx_mock.add_response(url=f"{BASE_URL}/api/project-api/images/999", status_code=404)
     with pytest.raises(AnnoAPIError) as exc:
         client.get_image(999)
     assert exc.value.status_code == 404
@@ -211,7 +211,7 @@ def test_get_image_not_found(client: Client, httpx_mock: HTTPXMock) -> None:
 def test_get_image_file(client: Client, httpx_mock: HTTPXMock) -> None:
     png_bytes = b"\x89PNG\r\n\x1a\nfake"
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/images/1/original_file",
+        url=f"{BASE_URL}/api/project-api/images/1/original_file",
         content=png_bytes,
         headers={"content-type": "image/png"},
     )
@@ -221,7 +221,7 @@ def test_get_image_file(client: Client, httpx_mock: HTTPXMock) -> None:
 
 def test_get_image_file_error(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/images/1/original_file",
+        url=f"{BASE_URL}/api/project-api/images/1/original_file",
         status_code=403,
     )
     with pytest.raises(AnnoAPIError):
@@ -252,7 +252,7 @@ BATCH_RESPONSE = {
 
 def test_upload_annotations(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/images/1/annotations",
+        url=f"{BASE_URL}/api/project-api/images/1/annotations",
         json=BATCH_RESPONSE,
     )
     annotations = [
@@ -276,7 +276,7 @@ def test_upload_annotations(client: Client, httpx_mock: HTTPXMock) -> None:
 
 def test_upload_annotations_all_geometry_types(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/images/1/annotations",
+        url=f"{BASE_URL}/api/project-api/images/1/annotations",
         json={"created": 3, "failed": 0, "results": []},
     )
     annotations = [
@@ -314,7 +314,7 @@ MODIFY_RESPONSE = {
 
 def test_modify_annotation(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/images/1/annotations/100",
+        url=f"{BASE_URL}/api/project-api/images/1/annotations/100",
         json=MODIFY_RESPONSE,
     )
     ann = Annotation.from_geometry(Box2D(5, 5, 50, 50), label=1)
@@ -330,13 +330,99 @@ def test_modify_annotation(client: Client, httpx_mock: HTTPXMock) -> None:
 
 def test_modify_annotation_not_found(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/images/1/annotations/999",
+        url=f"{BASE_URL}/api/project-api/images/1/annotations/999",
         status_code=404,
     )
     ann = Annotation.from_geometry(Box2D(0, 0, 1, 1), label=0)
     with pytest.raises(AnnoAPIError) as exc:
         client.modify_annotation(image_id=1, annotation_id=999, annotation=ann)
     assert exc.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /images/{id}/annotations
+# ---------------------------------------------------------------------------
+
+
+ANNOTATIONS_LIST = [
+    {
+        "id": 1,
+        "image_id": 42,
+        "annotation_type": "box",
+        "label": 0,
+        "data": {"x": 10, "y": 20, "width": 100, "height": 50, "rotation": 0.0},
+        "is_active": True,
+        "created_at": "2025-06-01T10:00:00Z",
+        "modified_at": "2025-06-01T10:00:00Z",
+    },
+    {
+        "id": 2,
+        "image_id": 42,
+        "annotation_type": "polygon",
+        "label": 1,
+        "data": {"points": [[0, 0], [10, 0], [10, 10]]},
+        "is_active": True,
+        "created_at": "2025-06-01T10:00:00Z",
+        "modified_at": "2025-06-01T10:00:00Z",
+    },
+    {
+        "id": 3,
+        "image_id": 42,
+        "annotation_type": "box",
+        "label": None,
+        "data": {"x": 5, "y": 5, "width": 20, "height": 30, "rotation": 45.0},
+        "is_active": True,
+        "created_at": "2025-06-01T10:00:00Z",
+        "modified_at": "2025-06-01T10:00:00Z",
+    },
+    {
+        "id": 4,
+        "image_id": 42,
+        "annotation_type": "keypoint",
+        "label": 2,
+        "data": {"points": [[1.5, 2.5], [3.0, 4.0]]},
+        "is_active": True,
+        "created_at": "2025-06-01T10:00:00Z",
+        "modified_at": "2025-06-01T10:00:00Z",
+    },
+]
+
+
+def test_get_annotations(client: Client, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images/42/annotations",
+        json=ANNOTATIONS_LIST,
+    )
+    annotations = client.get_annotations(image_id=42)
+    assert len(annotations) == 4
+
+    # Box2D (rotation=0)
+    assert isinstance(annotations[0].geometry, Box2D)
+    assert annotations[0].label == 0
+    assert annotations[0].geometry.x == 10
+
+    # Polygon2D
+    assert isinstance(annotations[1].geometry, Polygon2D)
+    assert annotations[1].label == 1
+    assert annotations[1].geometry.points == [[0, 0], [10, 0], [10, 10]]
+
+    # RotatedBox2D (rotation=45)
+    assert isinstance(annotations[2].geometry, RotatedBox2D)
+    assert annotations[2].label is None
+    assert annotations[2].geometry.rotation == 45.0
+
+    # Keypoint2D
+    assert isinstance(annotations[3].geometry, Keypoint2D)
+    assert annotations[3].label == 2
+
+
+def test_get_annotations_empty(client: Client, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images/99/annotations",
+        json=[],
+    )
+    annotations = client.get_annotations(image_id=99)
+    assert annotations == []
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +468,7 @@ def test_explicit_close(client: Client) -> None:
 
 def test_api_key_sent_in_header(client: Client, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
-        url=f"{BASE_URL}/api/infers/project/meta",
+        url=f"{BASE_URL}/api/project-api/meta",
         json=META_RESPONSE,
     )
     client.get_meta()

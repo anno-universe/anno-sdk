@@ -60,8 +60,7 @@ except ImportError:
 def _require_server_extras() -> None:
     if not _FASTAPI_AVAILABLE:
         raise ImportError(
-            "anno-sdk server extras not installed.  Run:\n"
-            "    pip install anno-sdk[server]"
+            "anno-sdk server extras not installed.  Run:\n    pip install anno-sdk[server]"
         )
 
 
@@ -227,9 +226,11 @@ class InferenceServer:
         """Block and serve requests via uvicorn until interrupted."""
         logger.info(
             "anno-serve listening on http://%s:%d, auth=%s, docs=http://%s:%d/docs",
-            self.host, self.port,
+            self.host,
+            self.port,
             "on" if self._auth_dep else "off",
-            self.host, self.port,
+            self.host,
+            self.port,
         )
         uvicorn.run(self._app, host=self.host, port=self.port, log_config=None)
 
@@ -290,21 +291,28 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--auth-header", default=None, help="Require this header on /predict")
     p.add_argument(
-        "--auth-header-value", default=None, metavar="VALUE",
+        "--auth-header-value",
+        default=None,
+        metavar="VALUE",
         help="Expected header value (requires --auth-header)",
     )
     p.add_argument(
-        "--auth-query", default=None, help="Require this query param on /predict",
+        "--auth-query",
+        default=None,
+        help="Require this query param on /predict",
     )
     p.add_argument(
-        "--auth-query-value", default=None, metavar="VALUE",
+        "--auth-query-value",
+        default=None,
+        metavar="VALUE",
         help="Expected query value (requires --auth-query)",
     )
 
     p.add_argument(
-        "--cors-origin", default=os.environ.get("CORS_ORIGIN"),
+        "--cors-origin",
+        default=os.environ.get("CORS_ORIGIN"),
         help="Allowed CORS origin (e.g. '*' or 'http://localhost:5173'). "
-             "Also settable via CORS_ORIGIN env var.",
+        "Also settable via CORS_ORIGIN env var.",
     )
 
     args = p.parse_args(argv)

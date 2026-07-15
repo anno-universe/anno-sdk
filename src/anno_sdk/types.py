@@ -26,6 +26,7 @@ Response / result DOs
 from __future__ import annotations
 
 import datetime
+import math
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
@@ -41,6 +42,8 @@ class Box2D:
     """Axis-aligned bounding box.
 
     Serializes to the backend ``"box"`` geometry with ``rotation=0.0``.
+    The x, y coordinates represent the **top-left corner** of the
+    unrotated box.
     """
 
     x: float
@@ -61,13 +64,29 @@ class Box2D:
             "rotation": 0.0,
         }
 
+    def to_corners(self) -> list[list[float]]:
+        """Return the four corners of the box as ``[[x,y], ...]`` in TL-TR-BR-BL order.
+
+        For axis-aligned boxes this is simply the unrotated corners.
+        For interoperability with :class:`RotatedBox2D`, the same method
+        exists there and applies the rotation around the box center.
+        """
+        return [
+            [self.x, self.y],
+            [self.x + self.width, self.y],
+            [self.x + self.width, self.y + self.height],
+            [self.x, self.y + self.height],
+        ]
+
 
 @dataclass
 class RotatedBox2D:
     """Rotated bounding box.
 
     Serializes to the backend ``"box"`` geometry including the rotation
-    angle in degrees clockwise.
+    angle in degrees clockwise.  ``x`` and ``y`` represent the **top-left
+    corner** of the unrotated box; rotation is applied around the box
+    **center** (``x + width/2, y + height/2``).
     """
 
     x: float
@@ -88,6 +107,35 @@ class RotatedBox2D:
             "height": self.height,
             "rotation": self.rotation,
         }
+
+    def to_corners(self) -> list[list[float]]:
+        """Return the four corners after rotation, TL-TR-BR-BL order.
+
+        Rotation is in degrees and is applied around the box center.
+        Corners are computed as:
+
+            cx = x + width/2
+            cy = y + height/2
+
+        then each corner (local -hw/-hh, +hw/-hh, +hw/+hh, -hw/+hh) is
+        rotated around (cx, cy).
+        """
+        if abs(self.rotation) < 1e-6:
+            return Box2D(self.x, self.y, self.width, self.height).to_corners()
+        cx = self.x + self.width / 2
+        cy = self.y + self.height / 2
+        hw = self.width / 2
+        hh = self.height / 2
+        rad = math.radians(self.rotation)
+        c = math.cos(rad)
+        s = math.sin(rad)
+        local = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+        corners: list[list[float]] = []
+        for dx, dy in local:
+            rx = cx + dx * c - dy * s
+            ry = cy + dx * s + dy * c
+            corners.append([rx, ry])
+        return corners
 
 
 @dataclass
@@ -502,9 +550,7 @@ def _trace_border_python(mask: "numpy.ndarray") -> "numpy.ndarray | None":
     return np.array(boundary, dtype=np.int32).reshape(-1, 1, 2)
 
 
-def _simplify_contour(
-    contour: "numpy.ndarray", epsilon: float
-) -> "numpy.ndarray":
+def _simplify_contour(contour: "numpy.ndarray", epsilon: float) -> "numpy.ndarray":
     """Simplify a contour using Douglas-Peucker (requires ``cv2``)."""
     try:
         import cv2

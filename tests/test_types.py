@@ -39,6 +39,16 @@ class TestBox2D:
     def test_annotation_type_is_box(self) -> None:
         assert Box2D(0, 0, 1, 1).annotation_type == "box"
 
+    def test_to_corners_axis_aligned(self) -> None:
+        box = Box2D(x=10, y=20, width=100, height=50)
+        corners = box.to_corners()
+        assert corners == [[10, 20], [110, 20], [110, 70], [10, 70]]
+
+    def test_to_corners_zero_size(self) -> None:
+        box = Box2D(x=5, y=5, width=0, height=0)
+        corners = box.to_corners()
+        assert corners == [[5, 5], [5, 5], [5, 5], [5, 5]]
+
 
 class TestRotatedBox2D:
     def test_to_dict_includes_rotation(self) -> None:
@@ -53,6 +63,38 @@ class TestRotatedBox2D:
 
     def test_annotation_type_is_box(self) -> None:
         assert RotatedBox2D(0, 0, 1, 1, 0).annotation_type == "box"
+
+    def test_to_corners_zero_rotation(self) -> None:
+        box = RotatedBox2D(x=10, y=20, width=100, height=50, rotation=0)
+        corners = box.to_corners()
+        assert corners == [[10, 20], [110, 20], [110, 70], [10, 70]]
+
+    def test_to_corners_90deg(self) -> None:
+        box = RotatedBox2D(x=10, y=20, width=100, height=50, rotation=90)
+        corners = box.to_corners()
+        assert len(corners) == 4
+        for corner in corners:
+            assert len(corner) == 2
+        expected = [[85.0, -5.0], [85.0, 95.0], [35.0, 95.0], [35.0, -5.0]]
+        for i, (ex, ey) in enumerate(expected):
+            assert abs(corners[i][0] - ex) < 1e-9
+            assert abs(corners[i][1] - ey) < 1e-9
+
+    def test_to_corners_45deg(self) -> None:
+        import math
+
+        box = RotatedBox2D(x=0, y=0, width=100, height=100, rotation=45)
+        corners = box.to_corners()
+        assert len(corners) == 4
+        distances = [math.hypot(c[0] - 50, c[1] - 50) for c in corners]
+        for d in distances:
+            assert abs(d - math.sqrt(2) * 50) < 1e-6
+        # Actually let me just trust the math and verify properties
+        # The 4 corners should form a rotated square
+        # Verify they are all at equal distance from center
+        distances = [math.sqrt((c[0] - 50) ** 2 + (c[1] - 50) ** 2) for c in corners]
+        for d in distances:
+            assert abs(d - math.sqrt(2 * 50**2)) < 1e-6  # ~70.71
 
 
 class TestPolygon2D:
@@ -154,9 +196,7 @@ class TestAnnotation:
         }
 
     def test_to_dict_includes_client_ref(self) -> None:
-        ann = Annotation(
-            label=2, geometry=Box2D(0, 0, 10, 10), client_ref="ref-001"
-        )
+        ann = Annotation(label=2, geometry=Box2D(0, 0, 10, 10), client_ref="ref-001")
         d = ann.to_dict()
         assert d["client_ref"] == "ref-001"
 
@@ -275,9 +315,7 @@ class TestAnnotationBatchResult:
 
 class TestAnnotationResultItem:
     def test_is_success_for_created(self) -> None:
-        item = AnnotationResultItem(
-            client_ref="x", image_id=1, annotation_id=5, status="created"
-        )
+        item = AnnotationResultItem(client_ref="x", image_id=1, annotation_id=5, status="created")
         assert item.is_success
 
     def test_is_success_for_error(self) -> None:

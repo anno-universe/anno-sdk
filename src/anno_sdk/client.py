@@ -1,4 +1,4 @@
-"""Anno inference API client."""
+"""Anno project API client."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from .types import (
 
 
 class Client:
-    """HTTP client for the Anno project inference API.
+    """HTTP client for the Anno project API.
 
     Authenticates with a per-project API key via the ``X-API-Key`` header.
     All methods return deserialized data-objects, not raw dicts.
@@ -103,7 +103,7 @@ class Client:
 
     def get_meta(self) -> ProjectMeta:
         """Return project metadata including the label mapping."""
-        data = self._get("/api/infers/project/meta")
+        data = self._get("/api/project-api/meta")
         return ProjectMeta.from_dict(data)
 
     # -- images ------------------------------------------------------------
@@ -129,7 +129,7 @@ class Client:
         if has_active_annotations is not None:
             params["has_active_annotations"] = str(has_active_annotations).lower()
 
-        data = self._get("/api/infers/project/images", **params)
+        data = self._get("/api/project-api/images", **params)
         return PaginatedResponse.from_dict(data, item_factory=Image.from_dict)
 
     def iter_images(
@@ -161,19 +161,36 @@ class Client:
 
     def get_image(self, image_id: int) -> Image:
         """Get a single image by ID."""
-        data = self._get(f"/api/infers/project/images/{image_id}")
+        data = self._get(f"/api/project-api/images/{image_id}")
         return Image.from_dict(data)
 
     def get_image_file(self, image_id: int) -> bytes:
         """Download the original image file bytes."""
-        response = self._http.get(
-            f"/api/infers/project/images/{image_id}/original_file"
-        )
+        response = self._http.get(f"/api/project-api/images/{image_id}/original_file")
         if response.status_code >= 400:
             raise AnnoAPIError(response.status_code, response.text)
         return response.content
 
     # -- annotations -------------------------------------------------------
+
+    def get_annotations(self, image_id: int) -> list[Annotation]:
+        """Retrieve all active annotations for an image.
+
+        Returns a list of :class:`Annotation` objects with geometry data.
+        Each annotation's geometry is deserialized into the appropriate DO
+        (:class:`Box2D`, :class:`RotatedBox2D`, :class:`Polygon2D`, or
+        :class:`Keypoint2D`).
+        """
+        data = self._get(f"/api/project-api/images/{image_id}/annotations")
+        annotations: list[Annotation] = []
+        for item in data:
+            ann_dict = {
+                "annotation_type": item["annotation_type"],
+                "label": item.get("label"),
+                item["annotation_type"]: item["data"],
+            }
+            annotations.append(Annotation.from_dict(ann_dict))
+        return annotations
 
     def upload_annotations(
         self,
@@ -195,7 +212,7 @@ class Client:
             "annotations": [a.to_dict() for a in annotations],
         }
         data = self._post(
-            f"/api/infers/project/images/{image_id}/annotations",
+            f"/api/project-api/images/{image_id}/annotations",
             json=body,
         )
         return AnnotationBatchResult.from_dict(data)
@@ -217,7 +234,7 @@ class Client:
             annotation: The replacement annotation payload.
         """
         data = self._patch(
-            f"/api/infers/project/images/{image_id}/annotations/{annotation_id}",
+            f"/api/project-api/images/{image_id}/annotations/{annotation_id}",
             json=annotation.to_dict(),
         )
         return AnnotationModifyResult.from_dict(data)
