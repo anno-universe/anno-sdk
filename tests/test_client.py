@@ -16,8 +16,8 @@ from anno_sdk import (
     Client,
     Image,
     Keypoint2D,
-    Polygon2D,
     PaginatedResponse,
+    Polygon2D,
     ProjectMeta,
     RotatedBox2D,
 )
@@ -204,6 +204,93 @@ def test_get_image_not_found(client: Client, httpx_mock: HTTPXMock) -> None:
 
 
 # ---------------------------------------------------------------------------
+# POST /images
+# ---------------------------------------------------------------------------
+
+
+UPLOAD_IMAGE_RESPONSE = {
+    "id": 123,
+    "project_id": 1,
+    "file_name": "sdk-upload.png",
+    "width": 32,
+    "height": 24,
+    "tags": [],
+}
+
+
+def test_upload_image_from_path(client: Client, httpx_mock: HTTPXMock, tmp_path) -> None:
+    image_path = tmp_path / "sdk-upload.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images",
+        status_code=201,
+        json=UPLOAD_IMAGE_RESPONSE,
+    )
+
+    image = client.upload_image(image_path, content_type="image/png")
+
+    assert isinstance(image, Image)
+    assert image.id == 123
+    assert image.file_name == "sdk-upload.png"
+    assert (image.width, image.height) == (32, 24)
+    req = httpx_mock.get_request()
+    assert req is not None
+    assert req.method == "POST"
+    assert req.headers["X-API-Key"] == API_KEY
+    assert req.headers["content-type"].startswith("multipart/form-data")
+    body = req.read()
+    assert b'name="file"' in body
+    assert b'filename="sdk-upload.png"' in body
+    assert b"Content-Type: image/png" in body
+    assert b"\x89PNG\r\n\x1a\nfake" in body
+
+
+def test_upload_image_with_filename_override(
+    client: Client, httpx_mock: HTTPXMock, tmp_path
+) -> None:
+    image_path = tmp_path / "original.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images",
+        status_code=201,
+        json=UPLOAD_IMAGE_RESPONSE,
+    )
+
+    image = client.upload_image(
+        image_path,
+        filename="sdk-upload.png",
+        content_type="image/png",
+    )
+
+    assert image.id == 123
+    body = httpx_mock.get_request().read()
+    assert b'filename="sdk-upload.png"' in body
+
+
+def test_upload_image_error(client: Client, httpx_mock: HTTPXMock, tmp_path) -> None:
+    image_path = tmp_path / "invalid.png"
+    image_path.write_bytes(b"not an image")
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images",
+        status_code=400,
+        text="Invalid image file.",
+    )
+
+    with pytest.raises(AnnoAPIError) as exc:
+        client.upload_image(image_path)
+    assert exc.value.status_code == 400
+
+
+def test_upload_image_network_error(client: Client, httpx_mock: HTTPXMock, tmp_path) -> None:
+    image_path = tmp_path / "sdk-upload.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    httpx_mock.add_exception(httpx.ConnectError("Connection refused"))
+
+    with pytest.raises(AnnoConnectionError):
+        client.upload_image(image_path)
+
+
+# ---------------------------------------------------------------------------
 # GET /images/{id}/original_file
 # ---------------------------------------------------------------------------
 
@@ -226,6 +313,49 @@ def test_get_image_file_error(client: Client, httpx_mock: HTTPXMock) -> None:
     )
     with pytest.raises(AnnoAPIError):
         client.get_image_file(1)
+
+
+def test_get_image_file_follows_redirect(client: Client, httpx_mock: HTTPXMock) -> None:
+    file_url = "https://files.example.com/image.png"
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images/1/original_file",
+        status_code=307,
+        headers={"location": file_url},
+    )
+    httpx_mock.add_response(url=file_url, content=b"image bytes")
+
+    assert client.get_image_file(1) == b"image bytes"
+    requests = httpx_mock.get_requests()
+    assert requests[0].headers["X-API-Key"] == API_KEY
+    assert "X-API-Key" not in requests[1].headers
+
+
+def test_iter_image_file(client: Client, httpx_mock: HTTPXMock) -> None:
+    png_bytes = b"\x89PNG\r\n\x1a\nfake"
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images/1/original_file",
+        content=png_bytes,
+        headers={"content-type": "image/png"},
+    )
+    chunks = client.iter_image_file(1)
+    assert b"".join(chunks) == png_bytes
+
+
+def test_iter_image_file_network_error(client: Client, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_exception(httpx.ReadError("Connection interrupted"))
+
+    with pytest.raises(AnnoConnectionError):
+        list(client.iter_image_file(1))
+
+
+def test_iter_image_file_error(client: Client, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/project-api/images/1/original_file",
+        status_code=403,
+    )
+    with pytest.raises(AnnoAPIError):
+        for _ in client.iter_image_file(1):
+            pass
 
 
 # ---------------------------------------------------------------------------

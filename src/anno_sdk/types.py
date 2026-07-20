@@ -144,6 +144,9 @@ class Polygon2D:
 
     points: list[list[float]]
 
+    def __repr__(self) -> str:
+        return f"Polygon2D(n_points={len(self.points)})"
+
     @property
     def annotation_type(self) -> str:
         return "polygon"
@@ -217,6 +220,9 @@ class Keypoint2D:
     """Keypoint set defined by a list of ``[x, y]`` points."""
 
     points: list[list[float]]
+
+    def __repr__(self) -> str:
+        return f"Keypoint2D(n_points={len(self.points)})"
 
     @property
     def annotation_type(self) -> str:

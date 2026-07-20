@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from os import PathLike
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -48,10 +50,13 @@ class Client:
         timeout: float = 30.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        api_url = httpx.URL(self.base_url)
+        self._api_origin = (api_url.scheme, api_url.host, api_url.port)
         self._http = httpx.Client(
             base_url=self.base_url,
             headers={"X-API-Key": api_key},
             timeout=timeout,
+            event_hooks={"request": [self._protect_api_key]},
         )
 
     # -- context manager ---------------------------------------------------
@@ -67,6 +72,12 @@ class Client:
         self._http.close()
 
     # -- helpers -----------------------------------------------------------
+
+    def _protect_api_key(self, request: httpx.Request) -> None:
+        """Keep project credentials off cross-origin redirect requests."""
+        request_origin = (request.url.scheme, request.url.host, request.url.port)
+        if request_origin != self._api_origin:
+            request.headers.pop("X-API-Key", None)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict | list:
         """Issue an HTTP request and return the parsed JSON body.
@@ -164,12 +175,89 @@ class Client:
         data = self._get(f"/api/project-api/images/{image_id}")
         return Image.from_dict(data)
 
+    def upload_image(
+        self,
+        file: str | PathLike[str],
+        *,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> Image:
+        """Upload an image file to the project.
+
+        The backend validates that the uploaded bytes are a valid image and
+        records the returned filename from the multipart part.
+
+        Parameters:
+            file: Local path.
+            filename: Optional multipart filename. Defaults to the path basename.
+            content_type: Optional MIME type, e.g. ``"image/png"``.
+        """
+        path = Path(file)
+        upload_name = filename or path.name
+        file_obj = path.open("rb")
+        try:
+            files = (
+                {"file": (upload_name, file_obj, content_type)}
+                if content_type is not None
+                else {"file": (upload_name, file_obj)}
+            )
+            try:
+                response = self._http.post("/api/project-api/images", files=files)
+            except httpx.RequestError as exc:
+                raise AnnoConnectionError(str(exc)) from exc
+
+            if response.status_code >= 400:
+                raise AnnoAPIError(response.status_code, response.text)
+
+            return Image.from_dict(response.json())
+        finally:
+            file_obj.close()
+
     def get_image_file(self, image_id: int) -> bytes:
-        """Download the original image file bytes."""
-        response = self._http.get(f"/api/project-api/images/{image_id}/original_file")
+        """Download the original image file bytes.
+
+        Loads the entire image into memory. For large files, prefer
+        :meth:`iter_image_file` which streams in chunks.
+        """
+        try:
+            response = self._http.get(
+                f"/api/project-api/images/{image_id}/original_file",
+                follow_redirects=True,
+            )
+        except httpx.RequestError as exc:
+            raise AnnoConnectionError(str(exc)) from exc
         if response.status_code >= 400:
             raise AnnoAPIError(response.status_code, response.text)
         return response.content
+
+    def iter_image_file(
+        self,
+        image_id: int,
+        *,
+        chunk_size: int = 10240,
+    ) -> Iterator[bytes]:
+        """Stream the original image file bytes in chunks.
+
+        Returns an iterator that yields byte chunks as they are received.
+        This avoids loading the entire image into memory at once, which is
+        useful for large files.
+
+        Parameters:
+            image_id: The image ID.
+            chunk_size: Bytes per chunk (default 10240).
+        """
+        try:
+            with self._http.stream(
+                "GET",
+                f"/api/project-api/images/{image_id}/original_file",
+                follow_redirects=True,
+            ) as response:
+                if response.status_code >= 400:
+                    response.read()
+                    raise AnnoAPIError(response.status_code, response.text)
+                yield from response.iter_bytes(chunk_size=chunk_size)
+        except httpx.RequestError as exc:
+            raise AnnoConnectionError(str(exc)) from exc
 
     # -- annotations -------------------------------------------------------
 
