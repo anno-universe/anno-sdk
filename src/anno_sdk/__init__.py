@@ -7,9 +7,12 @@ Usage::
     client = Client(base_url="http://localhost:8000", api_key="ak_...")
     meta = client.get_meta()
 
+    # Upload an image to the project
+    image = client.upload_image("cat.png")
+
     # Upload a box annotation
     ann = Annotation(label=1, geometry=Box2D(10, 20, 100, 50))
-    result = client.upload_annotations(image_id=42, annotations=[ann])
+    result = client.upload_annotations(image_id=image.id, annotations=[ann])
 
     # Iterate over all images
     for img in client.iter_images():
