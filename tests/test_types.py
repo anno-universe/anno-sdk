@@ -150,11 +150,21 @@ class TestPolygon2DFromBinaryMask:
 
 class TestKeypoint2D:
     def test_to_dict(self) -> None:
-        kp = Keypoint2D(points=[[1.5, 2.5], [3.0, 4.0]])
-        assert kp.to_dict() == {"points": [[1.5, 2.5], [3.0, 4.0]]}
+        kp = Keypoint2D(points=[[1.5, 2.5, 2], [3.0, 4.0, 1], [0, 0, 0]])
+        assert kp.to_dict() == {
+            "points": [[1.5, 2.5, 2], [3.0, 4.0, 1], [0, 0, 0]]
+        }
 
     def test_annotation_type_is_keypoint(self) -> None:
-        assert Keypoint2D([]).annotation_type == "keypoint"
+        assert Keypoint2D([[1, 2, 2]]).annotation_type == "keypoint"
+
+    def test_rejects_legacy_xy_points(self) -> None:
+        with pytest.raises(ValueError, match="triple"):
+            Keypoint2D([[1, 2]])
+
+    def test_rejects_nonzero_absent_point(self) -> None:
+        with pytest.raises(ValueError, match=r"\[0, 0, 0\]"):
+            Keypoint2D([[1, 2, 0]])
 
 
 # ---------------------------------------------------------------------------
@@ -188,11 +198,11 @@ class TestAnnotation:
         }
 
     def test_to_dict_keypoint2d(self) -> None:
-        ann = Annotation(label=0, geometry=Keypoint2D([[5.0, 5.0]]))
+        ann = Annotation(label=0, geometry=Keypoint2D([[5.0, 5.0, 2]]))
         assert ann.to_dict() == {
             "annotation_type": "keypoint",
             "label": 0,
-            "keypoint": {"points": [[5.0, 5.0]]},
+            "keypoint": {"points": [[5.0, 5.0, 2]]},
         }
 
     def test_to_dict_includes_client_ref(self) -> None:

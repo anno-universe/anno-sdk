@@ -28,6 +28,7 @@ from __future__ import annotations
 import datetime
 import math
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Generic, TypeVar
 
 T = TypeVar("T")
@@ -215,11 +216,40 @@ class Polygon2D:
         return cls(points=points)
 
 
+class KeypointVisibility(IntEnum):
+    """COCO keypoint visibility values."""
+
+    ABSENT = 0
+    OCCLUDED = 1
+    VISIBLE = 2
+
+
 @dataclass
 class Keypoint2D:
-    """Keypoint set defined by a list of ``[x, y]`` points."""
+    """Keypoint set defined by ``[x, y, visibility]`` triples."""
 
-    points: list[list[float]]
+    points: list[list[float | int]]
+
+    def __post_init__(self) -> None:
+        if not self.points:
+            raise ValueError("Keypoint2D requires at least one point.")
+        normalized: list[list[float | int]] = []
+        for point in self.points:
+            if len(point) != 3:
+                raise ValueError("Each keypoint must be an [x, y, visibility] triple.")
+            x, y, raw_visibility = point
+            if isinstance(raw_visibility, bool):
+                raise ValueError("Keypoint visibility must be 0, 1, or 2.")
+            try:
+                visibility = KeypointVisibility(raw_visibility)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Keypoint visibility must be 0, 1, or 2.") from exc
+            if not math.isfinite(float(x)) or not math.isfinite(float(y)):
+                raise ValueError("Keypoint coordinates must be finite numbers.")
+            if visibility is KeypointVisibility.ABSENT and (x != 0 or y != 0):
+                raise ValueError("Absent keypoints must be encoded as [0, 0, 0].")
+            normalized.append([x, y, int(visibility)])
+        self.points = normalized
 
     def __repr__(self) -> str:
         return f"Keypoint2D(n_points={len(self.points)})"
@@ -254,6 +284,10 @@ class Annotation:
     label: int | None
     geometry: GeometryDO
     client_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.geometry, Keypoint2D) and self.label is None:
+            raise ValueError("Keypoint annotations require a numeric label category.")
 
     def to_dict(self) -> dict:
         """Serialize to the backend wire format for a single annotation item."""

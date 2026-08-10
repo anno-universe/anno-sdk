@@ -97,12 +97,39 @@ class TestToCoco:
 
     def test_keypoint(self) -> None:
         annotations = {
-            1: [Annotation(label=2, geometry=Keypoint2D([[100, 200], [300, 400]]))],
+            1: [
+                Annotation(
+                    label=2,
+                    geometry=Keypoint2D([[100, 200, 2], [300, 400, 1], [0, 0, 0]]),
+                )
+            ],
         }
         result = to_coco(SAMPLE_IMAGES[:1], annotations, LABEL_MAPPING)
         ann = result["annotations"][0]
-        assert ann["keypoints"] == [100, 200, 2, 300, 400, 2]
+        assert ann["keypoints"] == [100, 200, 2, 300, 400, 1, 0, 0, 0]
         assert ann["num_keypoints"] == 2
+
+    def test_category_inherits_supercategory_keypoint_schema(self) -> None:
+        mapping = {
+            "version": 3,
+            "labels": {
+                "husky": {"id": 1, "supercategory": "dog"},
+            },
+            "supercategories": {
+                "dog": {"keypoints": ["nose", "left_eye", "right_eye"]},
+            },
+        }
+
+        result = to_coco(SAMPLE_IMAGES[:1], {}, mapping)
+
+        assert result["categories"] == [
+            {
+                "id": 1,
+                "name": "husky",
+                "supercategory": "dog",
+                "keypoints": ["nose", "left_eye", "right_eye"],
+            }
+        ]
 
     def test_annotation_ids_sequential(self) -> None:
         annotations = {
@@ -194,7 +221,7 @@ class TestToYolo:
 
     def test_keypoint_skipped(self) -> None:
         annotations = {
-            1: [Annotation(label=2, geometry=Keypoint2D([[100, 200]]))],
+            1: [Annotation(label=2, geometry=Keypoint2D([[100, 200, 2]]))],
         }
         result = to_yolo(SAMPLE_IMAGES[:1], annotations, LABEL_MAPPING)
         assert result["labels/img_001.txt"] == ""

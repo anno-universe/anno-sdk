@@ -28,6 +28,33 @@ def _invert_label_mapping(label_mapping: dict) -> dict[int, str]:
     return result
 
 
+def _category_metadata(label_mapping: dict) -> dict[int, dict]:
+    """Extract optional supercategory and inherited keypoint metadata by id."""
+    labels = label_mapping.get("labels") if isinstance(label_mapping.get("labels"), dict) else None
+    source = labels if labels is not None else label_mapping
+    supercategories = label_mapping.get("supercategories", {})
+    result: dict[int, dict] = {}
+    for value in source.values():
+        if not isinstance(value, dict):
+            continue
+        class_id = value.get("id") if "id" in value else value.get("class_id")
+        if not isinstance(class_id, int):
+            continue
+        supercategory = value.get("supercategory")
+        keypoints = value.get("keypoints")
+        if not keypoints and isinstance(supercategory, str):
+            parent = supercategories.get(supercategory, {})
+            if isinstance(parent, dict):
+                keypoints = parent.get("keypoints")
+        metadata: dict = {}
+        if isinstance(supercategory, str):
+            metadata["supercategory"] = supercategory
+        if isinstance(keypoints, list) and all(isinstance(name, str) for name in keypoints):
+            metadata["keypoints"] = keypoints
+        result[class_id] = metadata
+    return result
+
+
 # ---------------------------------------------------------------------------
 # COCO
 # ---------------------------------------------------------------------------
@@ -50,6 +77,7 @@ def to_coco(
         following the COCO format specification.
     """
     label_names = _invert_label_mapping(label_mapping)
+    category_metadata = _category_metadata(label_mapping)
 
     coco_images: list[dict] = []
     coco_annotations: list[dict] = []
@@ -66,7 +94,15 @@ def to_coco(
         )
 
     for cat_id in sorted(label_names.keys()):
-        coco_categories.append({"id": cat_id, "name": label_names[cat_id], "supercategory": ""})
+        metadata = category_metadata.get(cat_id, {})
+        category = {
+            "id": cat_id,
+            "name": label_names[cat_id],
+            "supercategory": metadata.get("supercategory", ""),
+        }
+        if "keypoints" in metadata:
+            category["keypoints"] = metadata["keypoints"]
+        coco_categories.append(category)
 
     annotation_id = 1
     for image in images:
@@ -100,15 +136,16 @@ def to_coco(
 
             elif geometry.annotation_type == "keypoint":
                 pts = geometry.points
-                xs = [p[0] for p in pts]
-                ys = [p[1] for p in pts]
-                bbox = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
-                keypoints = []
-                num_keypoints = 0
-                for kp in pts:
-                    keypoints.extend([kp[0], kp[1], 2])
-                    num_keypoints += 1
-                area = bbox[2] * bbox[3]
+                labelled = [p for p in pts if p[2] > 0]
+                if labelled:
+                    xs = [p[0] for p in labelled]
+                    ys = [p[1] for p in labelled]
+                    bbox = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+                    area = bbox[2] * bbox[3]
+                else:
+                    bbox = [0, 0, 0, 0]
+                keypoints = [coordinate for kp in pts for coordinate in kp]
+                num_keypoints = len(labelled)
 
             coco_ann = {
                 "id": annotation_id,
@@ -120,7 +157,7 @@ def to_coco(
             }
             if seg:
                 coco_ann["segmentation"] = seg
-            if keypoints:
+            if keypoints is not None:
                 coco_ann["keypoints"] = keypoints
                 coco_ann["num_keypoints"] = num_keypoints
 

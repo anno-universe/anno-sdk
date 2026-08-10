@@ -64,6 +64,7 @@ from .types import (
     GeometryDO,
     Image,
     Keypoint2D,
+    KeypointVisibility,
     PaginatedResponse,
     Polygon2D,
     ProjectMeta,
@@ -77,6 +78,7 @@ __all__ = [
     "RotatedBox2D",
     "Polygon2D",
     "Keypoint2D",
+    "KeypointVisibility",
     "GeometryDO",
     # Payload
     "Annotation",

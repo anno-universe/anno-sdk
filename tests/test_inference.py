@@ -42,10 +42,10 @@ class TestAnnotationFromDict:
         assert restored.label is None
 
     def test_keypoint_roundtrip(self) -> None:
-        ann = Annotation(label=5, geometry=Keypoint2D([[1, 2], [3, 4]]))
+        ann = Annotation(label=5, geometry=Keypoint2D([[1, 2, 2], [3, 4, 1]]))
         restored = Annotation.from_dict(ann.to_dict())
         assert isinstance(restored.geometry, Keypoint2D)
-        assert restored.geometry.points == [[1, 2], [3, 4]]
+        assert restored.geometry.points == [[1, 2, 2], [3, 4, 1]]
 
     def test_client_ref_preserved(self) -> None:
         ann = Annotation(label=1, geometry=Box2D(0, 0, 1, 1), client_ref="abc")
@@ -95,7 +95,7 @@ class TestInferenceResponse:
                 Annotation(label=1, geometry=Box2D(0, 0, 10, 10)),
                 Annotation(label=2, geometry=RotatedBox2D(0, 0, 10, 10, rotation=45.0)),
                 Annotation(label=None, geometry=Polygon2D([[0, 0], [1, 1]])),
-                Annotation(label=3, geometry=Keypoint2D([[5, 5]])),
+                Annotation(label=3, geometry=Keypoint2D([[5, 5, 2]])),
             ],
             model_version="v1.2",
         )

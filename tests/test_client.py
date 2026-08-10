@@ -413,7 +413,7 @@ def test_upload_annotations_all_geometry_types(client: Client, httpx_mock: HTTPX
         Annotation.from_geometry(Box2D(0, 0, 1, 1), label=0),
         Annotation.from_geometry(RotatedBox2D(0, 0, 1, 1, 30), label=1),
         Annotation.from_geometry(Polygon2D([[0, 0]]), label=2),
-        Annotation.from_geometry(Keypoint2D([[1, 1]]), label=3),
+        Annotation.from_geometry(Keypoint2D([[1, 1, 2]]), label=3),
     ]
     result = client.upload_annotations(image_id=1, annotations=annotations)
     assert result.created == 3
@@ -510,7 +510,7 @@ ANNOTATIONS_LIST = [
         "image_id": 42,
         "annotation_type": "keypoint",
         "label": 2,
-        "data": {"points": [[1.5, 2.5], [3.0, 4.0]]},
+        "data": {"points": [[1.5, 2.5, 2], [3.0, 4.0, 1]]},
         "is_active": True,
         "created_at": "2025-06-01T10:00:00Z",
         "modified_at": "2025-06-01T10:00:00Z",
